@@ -42,8 +42,8 @@ stacpkg --help
 ## Docs
 
 - [Documentation](https://stacpkg.versioneer.at/)
-- [Create STAC Package](https://stacpkg.versioneer.at/tutorials/create-stac-package/)
-- [Relocate Assets](https://stacpkg.versioneer.at/tutorials/relocate-assets/)
+- [Tutorial - Create STAC Package](https://stacpkg.versioneer.at/tutorials/create-stac-package/)
+- [Tutorial - Relocate Assets](https://stacpkg.versioneer.at/tutorials/relocate-assets/)
 - [CLI Reference](https://stacpkg.versioneer.at/reference-guides/cli/)
 - [Items Reference](https://stacpkg.versioneer.at/reference-guides/items/)
 - [Asset Lock Reference](https://stacpkg.versioneer.at/reference-guides/asset-lock/)
@@ -62,5 +62,5 @@ Use the repository `Makefile` as the source of truth for local quality gates:
 
 ## License
 
-Apache 2.0 (Apache License Version 2.0, January 2004)  
+Apache 2.0 (Apache License Version 2.0, January 2004)
 <https://www.apache.org/licenses/LICENSE-2.0>
