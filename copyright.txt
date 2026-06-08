@@ -1,0 +1,2 @@
+Copyright {year}, Versioneer (https://versioneer.at)
+SPDX-License-Identifier: Apache-2.0

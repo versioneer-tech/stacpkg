@@ -1,0 +1,78 @@
+# Copyright 2026, Versioneer (https://versioneer.at)
+# SPDX-License-Identifier: Apache-2.0
+
+[build-system]
+requires = ["hatchling>=1.27.0,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stacpkg"
+version = "0.1.0"
+description = "Arrow-native STAC asset lock packaging"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Versioneer" }]
+requires-python = ">=3.13,<3.14"
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: Implementation :: CPython",
+]
+dependencies = [
+  "obstore>=0.9.0,<0.10",
+  "oras>=0.2.42,<0.3",
+  "pyarrow>=24.0.0,<25",
+]
+
+[project.scripts]
+stacpkg = "stacpkg.cli:main"
+
+[tool.hatch.build.targets.sdist]
+only-include = [
+  "src",
+  "LICENSE",
+  "README.md",
+  "pyproject.toml",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stacpkg"]
+
+[dependency-groups]
+dev = [
+  "pre-commit>=4.3.0,<5",
+  "pytest>=9.0.0,<10",
+  "ruff>=0.12.0,<0.13",
+]
+docs = [
+  "mike==2.2.0",
+  "mkdocs-jupyter==0.26.3",
+  "mkdocs-material==9.7.0",
+]
+integration = [
+  "duckdb>=1.4.4,<1.5",
+  "geoparquet-io>=0.3.0,<0.4",
+  "rustac[arrow]>=0.9.7,<0.9.8",
+  "rustac-duckdb-extensions>=1.4.4.post0,<1.5",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit"]
+pythonpath = ["src", "."]
+markers = [
+  "integration: local cross-library integration tests that require optional test dependencies but no service harness",
+  "e2e: end-to-end tests that require external services such as an S3 store or a registry",
+  "performance: heavier end-to-end checks with size or runtime assertions",
+]
+
+[tool.ruff]
+required-version = ">=0.12.0,<0.13"
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.format]
+docstring-code-format = true
+docstring-code-line-length = 72

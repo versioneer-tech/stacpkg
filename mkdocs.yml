@@ -1,0 +1,45 @@
+# Copyright 2026, Versioneer (https://versioneer.at)
+# SPDX-License-Identifier: Apache-2.0
+
+site_name: stacpkg
+site_url: https://versioneer-tech.github.io/stacpkg/
+repo_url: https://github.com/versioneer-tech/stacpkg
+repo_name: versioneer-tech/stacpkg
+copyright: "Copyright &copy; 2026, Versioneer"
+nav:
+  - Home: index.md
+  - Tutorials:
+    - Create STAC Package: tutorials/create-stac-package.md
+    - Relocate Assets: tutorials/relocate-assets.md
+  - Architecture:
+    - ADR-001 Arrow IPC Streams for Pipelines and CLI: architecture/0001-arrow-ipc-streams-for-pipelines-and-cli.md
+    - ADR-002 Package Files and OCI Layers: architecture/0002-package-files-and-manifest.md
+    - ADR-003 Asset Lock Row Structure: architecture/0003-asset-lock-row-structure.md
+    - ADR-004 Asset-Lock Checksum Facts and STAC Projection: architecture/0004-asset-lock-checksum-facts-and-stac-projection.md
+  - Reference:
+    - CLI: reference-guides/cli.md
+    - Items: reference-guides/items.md
+    - Asset Lock: reference-guides/asset-lock.md
+plugins:
+  - search
+  - mike
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight
+  - pymdownx.superfences
+theme:
+  name: material
+  language: en
+  logo: imgs/logo.png
+  favicon: imgs/favicon.ico
+  features:
+    - content.code.copy
+    - search.suggest
+    - toc.follow
+    - toc.permalink
+  palette:
+    - scheme: default
+      primary: white
+extra:
+  version:
+    provider: mike
