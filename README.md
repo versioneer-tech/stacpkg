@@ -158,12 +158,12 @@ stacpkg asset-lock from-parquet "$tmpdir/openaerialmap-austria.local.assets.lock
 
 ## Docs
 
-- [Documentation](https://stacpkg.versioneer.at/)
-- [Tutorial - Create STAC Package](https://stacpkg.versioneer.at/tutorials/create-stac-package/)
-- [Tutorial - Relocate Assets](https://stacpkg.versioneer.at/tutorials/relocate-assets/)
-- [CLI Reference](https://stacpkg.versioneer.at/reference-guides/cli/)
-- [Items Reference](https://stacpkg.versioneer.at/reference-guides/items/)
-- [Asset Lock Reference](https://stacpkg.versioneer.at/reference-guides/asset-lock/)
+- [Documentation](https://stacpkg.versioneer.at/latest/)
+- [Tutorial - Create STAC Package](https://stacpkg.versioneer.at/latest/tutorials/create-stac-package/)
+- [Tutorial - Relocate Assets](https://stacpkg.versioneer.at/latest/tutorials/relocate-assets/)
+- [CLI Reference](https://stacpkg.versioneer.at/latest/reference-guides/cli/)
+- [Items Reference](https://stacpkg.versioneer.at/latest/reference-guides/items/)
+- [Asset Lock Reference](https://stacpkg.versioneer.at/latest/reference-guides/asset-lock/)
 
 ## Development Commands
 
