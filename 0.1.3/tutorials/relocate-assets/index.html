@@ -1,0 +1,1337 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://versioneer-tech.github.io/stacpkg/0.1.3/tutorials/relocate-assets/">
+      
+      
+        <link rel="prev" href="../create-stac-package/">
+      
+      
+        <link rel="next" href="../../generated/usecases/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../imgs/favicon.ico">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.0">
+    
+    
+      
+        <title>Relocate Assets - stacpkg</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.618322db.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="white" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#relocate-assets" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="stacpkg" class="md-header__button md-logo" aria-label="stacpkg" data-md-component="logo">
+      
+  <img src="../../imgs/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            stacpkg
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Relocate Assets
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="white" data-md-color-accent="indigo"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/versioneer-tech/stacpkg" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    versioneer-tech/stacpkg
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="stacpkg" class="md-nav__button md-logo" aria-label="stacpkg" data-md-component="logo">
+      
+  <img src="../../imgs/logo.png" alt="logo">
+
+    </a>
+    stacpkg
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/versioneer-tech/stacpkg" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    versioneer-tech/stacpkg
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../create-stac-package/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Create STAC Package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Relocate Assets
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Relocate Assets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#starting-point" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Starting Point
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#relocate-assets-to-local-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Relocate Assets To Local Storage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#enrich-with-local-alternates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enrich With Local Alternates
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validate-remote-and-local" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validate Remote And Local
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use Cases
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Use Cases
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../generated/usecases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../generated/usecases/cdse-stac-to-geoparquet/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CDSE STAC To GeoParquet
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../generated/usecases/openaerialmap-package-inputs-and-relocation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OpenAerialMap Package Inputs and Relocation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../generated/usecases/openaerialmap-package-handover-to-recipient-storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OpenAerialMap Package Handover to Recipient Storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../generated/usecases/hls2-vienna-s3-package/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HLS2 Vienna S3 Package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/0001-arrow-ipc-streams-for-pipelines-and-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-001 Arrow IPC Streams for Pipelines and CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/0002-package-files-and-manifest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-002 Package Files and OCI Layers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/0003-asset-lock-row-structure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-003 Asset Lock Row Structure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/0004-asset-lock-checksum-facts-and-stac-projection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-004 Asset-Lock Checksum Facts and STAC Projection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/0005-asset-lock-driven-stac-projection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-005 Asset-Lock Driven STAC Projection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference-guides/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference-guides/items/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Items
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference-guides/asset-lock/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Asset Lock
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#starting-point" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Starting Point
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#relocate-assets-to-local-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Relocate Assets To Local Storage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#enrich-with-local-alternates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enrich With Local Alternates
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validate-remote-and-local" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validate Remote And Local
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="relocate-assets">Relocate Assets</h1>
+<p>This guide continues from
+<a href="../create-stac-package/">Create STAC Package</a>. It starts after the package
+tutorial has already selected the OpenAerialMap Items, built the package, derived
+the HTTPS asset lock, and added the S3 alternates. The new work here is to
+relocate those locked assets into local storage, add local alternates to the STAC
+Items, and validate the local lock.</p>
+<p>Run the commands in the same shell you used for the package tutorial so
+<code>$tmpdir</code> remains available. If you are starting from a new shell, set <code>tmpdir</code>
+to the temporary directory created in that tutorial.</p>
+<h2 id="starting-point">Starting Point</h2>
+<p>Complete the package tutorial through
+<a href="../create-stac-package/#enrich-the-stac-items">Enrich The STAC Items</a> first. At
+that point the OpenAerialMap sample has already done this:</p>
+<ul>
+<li>selected the two Austria Items from the <code>openaerialmap</code> collection;</li>
+<li>built a package with the selected Items and four non-metadata asset rows;</li>
+<li>validated the original HTTPS asset metadata in the package asset lock;</li>
+<li>created an S3-shaped asset lock without copying bytes;</li>
+<li>enriched the STAC Items with <code>alternate.s3.href</code> values.</li>
+</ul>
+<p>The relocation flow starts from this structure:</p>
+<div class="highlight"><pre><span></span><code>$tmpdir/
+  openaerialmap-austria.pkg/
+    items.parquet
+    assets.lock.parquet
+  openaerialmap-austria.s3.assets.lock.parquet
+  openaerialmap-austria.enriched.items.parquet
+</code></pre></div>
+<p>Use the package asset lock as the authoritative source for relocation, and use
+the enriched items table as the STAC view that already contains S3 alternates.</p>
+<h2 id="relocate-assets-to-local-storage">Relocate Assets To Local Storage</h2>
+<p>Relocate bytes from the locked package hrefs into a local mirror:</p>
+<div class="highlight"><pre><span></span><code>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$tmpdir</span><span class="s2">/local-assets&quot;</span>
+
+stacpkg<span class="w"> </span>asset-lock<span class="w"> </span>from-parquet<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$tmpdir</span><span class="s2">/openaerialmap-austria.pkg/assets.lock.parquet&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>stacpkg<span class="w"> </span>asset-lock<span class="w"> </span>relocate<span class="w"> </span><span class="se">\</span>
+<span class="w">      </span>--source-prefix<span class="w"> </span>https://oin-hotosm-temp.s3.amazonaws.com/<span class="w"> </span><span class="se">\</span>
+<span class="w">      </span>--store-type<span class="w"> </span>file<span class="w"> </span><span class="se">\</span>
+<span class="w">      </span>--key<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$tmpdir</span><span class="s2">/local-assets/&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span>--max-workers<span class="w"> </span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span>--memory-limit-bytes<span class="w"> </span>512MiB<span class="w"> </span><span class="se">\</span>
+<span class="w">      </span>--chunk-size-bytes<span class="w"> </span>8MiB<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>stacpkg<span class="w"> </span>asset-lock<span class="w"> </span>to-parquet<span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="s2">&quot;</span><span class="nv">$tmpdir</span><span class="s2">/openaerialmap-austria.local.asset-lock.parquet&quot;</span>
+
+<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;created </span><span class="nv">$tmpdir</span><span class="s2">/openaerialmap-austria.local.asset-lock.parquet&quot;</span>
+</code></pre></div>
+<p>Sample output:</p>
+<div class="highlight"><pre><span></span><code>created /tmp/stacpkg-openaerialmap-austria.ABC123/openaerialmap-austria.local.asset-lock.parquet
+</code></pre></div>
+<p>The relocated rows point at local files and carry relocated sizes:</p>
+<table>
+<thead>
+<tr>
+<th>item_id</th>
+<th>asset_key</th>
+<th>store_type</th>
+<th>key</th>
+<th>size_bytes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>631ee6653cdf1c0006b63c5b</code></td>
+<td><code>thumbnail</code></td>
+<td><code>file</code></td>
+<td><code>/tmp/.../local-assets/631ee6653cdf1c0006b63c5b/thumbnail.png</code></td>
+<td><code>793014</code></td>
+</tr>
+<tr>
+<td><code>631ee6653cdf1c0006b63c5b</code></td>
+<td><code>visual</code></td>
+<td><code>file</code></td>
+<td><code>/tmp/.../local-assets/631ee6653cdf1c0006b63c5b/visual.tif</code></td>
+<td><code>9913534</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="enrich-with-local-alternates">Enrich With Local Alternates</h2>
+<p>Add the relocated local hrefs as alternates, then promote them to primary hrefs in
+a temporary items table. This temporary table is only used to derive local file
+metadata:</p>
+<div class="highlight"><pre><span></span><code>stacpkg<span class="w"> </span>items<span class="w"> </span>from-parquet<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$tmpdir</span><span class="s2">/openaerialmap-austria.enriched.items.parquet&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>stacpkg<span class="w"> </span>items<span class="w"> </span>add-alternate<span class="w"> </span><span class="se">\</span>
+<span class="w">      </span>--asset-lock<span class="w"> </span>&lt;<span class="o">(</span>stacpkg<span class="w"> </span>asset-lock<span class="w"> </span>from-parquet<span class="w"> </span><span class="se">\</span>
+<span class="w">        </span><span class="s2">&quot;</span><span class="nv">$tmpdir</span><span class="s2">/openaerialmap-austria.local.asset-lock.parquet&quot;</span><span class="o">)</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span>--alternate-key<span class="w"> </span>original<span class="w"> </span><span class="se">\</span>
+<span class="w">      </span>--alternate-name<span class="w"> </span><span class="nb">local</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>stacpkg<span class="w"> </span>items<span class="w"> </span>promote-alternate<span class="w"> </span><span class="se">\</span>
+<span class="w">      </span>--alternate-key<span class="w"> </span>original<span class="w"> </span><span class="se">\</span>
+<span class="w">      </span>--mode<span class="w"> </span>switch<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>stacpkg<span class="w"> </span>items<span class="w"> </span>to-parquet<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$tmpdir</span><span class="s2">/openaerialmap-austria.local-primary.items.parquet&quot;</span>
+
+<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;created </span><span class="nv">$tmpdir</span><span class="s2">/openaerialmap-austria.local-primary.items.parquet&quot;</span>
+</code></pre></div>
+<p>Sample output:</p>
+<div class="highlight"><pre><span></span><code>created /tmp/stacpkg-openaerialmap-austria.ABC123/openaerialmap-austria.local-primary.items.parquet
+</code></pre></div>
+<p>Derive object metadata facts from the local files so local validation compares
+file-backend facts:</p>
+<div class="highlight"><pre><span></span><code>stacpkg<span class="w"> </span>items<span class="w"> </span>from-parquet<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$tmpdir</span><span class="s2">/openaerialmap-austria.local-primary.items.parquet&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>stacpkg<span class="w"> </span>asset-lock<span class="w"> </span>derive<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>stacpkg<span class="w"> </span>asset-lock<span class="w"> </span>to-parquet<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$tmpdir</span><span class="s2">/openaerialmap-austria.local.assets.lock.parquet&quot;</span>
+
+<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;created </span><span class="nv">$tmpdir</span><span class="s2">/openaerialmap-austria.local.assets.lock.parquet&quot;</span>
+</code></pre></div>
+<p>Sample output:</p>
+<div class="highlight"><pre><span></span><code>created /tmp/stacpkg-openaerialmap-austria.ABC123/openaerialmap-austria.local.assets.lock.parquet
+</code></pre></div>
+<p>Now enrich the original remote items table with local alternates as well:</p>
+<div class="highlight"><pre><span></span><code>stacpkg<span class="w"> </span>items<span class="w"> </span>from-parquet<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$tmpdir</span><span class="s2">/openaerialmap-austria.enriched.items.parquet&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>stacpkg<span class="w"> </span>items<span class="w"> </span>enrich<span class="w"> </span><span class="se">\</span>
+<span class="w">      </span>--asset-lock<span class="w"> </span>&lt;<span class="o">(</span>stacpkg<span class="w"> </span>asset-lock<span class="w"> </span>from-parquet<span class="w"> </span><span class="se">\</span>
+<span class="w">        </span><span class="s2">&quot;</span><span class="nv">$tmpdir</span><span class="s2">/openaerialmap-austria.local.assets.lock.parquet&quot;</span><span class="o">)</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span>--alternate-key<span class="w"> </span><span class="nb">local</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>stacpkg<span class="w"> </span>items<span class="w"> </span>to-parquet<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$tmpdir</span><span class="s2">/openaerialmap-austria.s3-local.items.parquet&quot;</span>
+
+<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;created </span><span class="nv">$tmpdir</span><span class="s2">/openaerialmap-austria.s3-local.items.parquet&quot;</span>
+</code></pre></div>
+<p>Sample output:</p>
+<div class="highlight"><pre><span></span><code>created /tmp/stacpkg-openaerialmap-austria.ABC123/openaerialmap-austria.s3-local.items.parquet
+</code></pre></div>
+<p>The first thumbnail now has remote primary access plus S3 and local alternates:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;href&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://oin-hotosm-temp.s3.amazonaws.com/631ee60c3cdf1c0006b63c56/0/631ee60c3cdf1c0006b63c57.png&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;alternate&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;s3&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;href&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;s3://oin-hotosm-temp/631ee60c3cdf1c0006b63c56/0/631ee60c3cdf1c0006b63c57.png&quot;</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">&quot;local&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;href&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;file:///tmp/stacpkg-openaerialmap-austria.ABC123/local-assets/631ee6653cdf1c0006b63c5b/thumbnail.png&quot;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<h2 id="validate-remote-and-local">Validate Remote And Local</h2>
+<p>The package tutorial already created the dry-run S3 lock. Validate it with
+unsigned public S3 access when you want to compare the remote alternate lock with
+the relocated local lock:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">AWS_SKIP_SIGNATURE</span><span class="o">=</span><span class="nb">true</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">AWS_EC2_METADATA_DISABLED</span><span class="o">=</span><span class="nb">true</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">AWS_DEFAULT_REGION</span><span class="o">=</span>us-east-1
+
+stacpkg<span class="w"> </span>asset-lock<span class="w"> </span>from-parquet<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$tmpdir</span><span class="s2">/openaerialmap-austria.s3.assets.lock.parquet&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>stacpkg<span class="w"> </span>asset-lock<span class="w"> </span>validate
+</code></pre></div>
+<p>Sample output:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;asset_key&quot;</span><span class="p">:</span><span class="s2">&quot;thumbnail&quot;</span><span class="p">,</span><span class="nt">&quot;errors&quot;</span><span class="p">:[],</span><span class="nt">&quot;item_id&quot;</span><span class="p">:</span><span class="s2">&quot;631ee6653cdf1c0006b63c5b&quot;</span><span class="p">,</span><span class="nt">&quot;key&quot;</span><span class="p">:</span><span class="s2">&quot;631ee60c3cdf1c0006b63c56/0/631ee60c3cdf1c0006b63c57.png&quot;</span><span class="p">,</span><span class="nt">&quot;store_container&quot;</span><span class="p">:</span><span class="s2">&quot;oin-hotosm-temp&quot;</span><span class="p">,</span><span class="nt">&quot;store_endpoint_url&quot;</span><span class="p">:</span><span class="s2">&quot;https://s3.amazonaws.com&quot;</span><span class="p">,</span><span class="nt">&quot;store_type&quot;</span><span class="p">:</span><span class="s2">&quot;s3&quot;</span><span class="p">,</span><span class="nt">&quot;valid&quot;</span><span class="p">:</span><span class="kc">true</span><span class="p">}</span>
+</code></pre></div>
+<p>Validate the local file lock:</p>
+<div class="highlight"><pre><span></span><code>stacpkg<span class="w"> </span>asset-lock<span class="w"> </span>from-parquet<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$tmpdir</span><span class="s2">/openaerialmap-austria.local.assets.lock.parquet&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>stacpkg<span class="w"> </span>asset-lock<span class="w"> </span>validate
+</code></pre></div>
+<p>Sample output:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;asset_key&quot;</span><span class="p">:</span><span class="s2">&quot;thumbnail&quot;</span><span class="p">,</span><span class="nt">&quot;errors&quot;</span><span class="p">:[],</span><span class="nt">&quot;item_id&quot;</span><span class="p">:</span><span class="s2">&quot;631ee6653cdf1c0006b63c5b&quot;</span><span class="p">,</span><span class="nt">&quot;key&quot;</span><span class="p">:</span><span class="s2">&quot;/tmp/stacpkg-openaerialmap-austria.ABC123/local-assets/631ee6653cdf1c0006b63c5b/thumbnail.png&quot;</span><span class="p">,</span><span class="nt">&quot;store_container&quot;</span><span class="p">:</span><span class="kc">null</span><span class="p">,</span><span class="nt">&quot;store_type&quot;</span><span class="p">:</span><span class="s2">&quot;file&quot;</span><span class="p">,</span><span class="nt">&quot;valid&quot;</span><span class="p">:</span><span class="kc">true</span><span class="p">}</span>
+</code></pre></div>
+<p>The remote validation checks the public S3 objects. The local validation checks
+the relocated files under <code>$tmpdir/local-assets</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2026, Versioneer
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["content.code.copy", "search.suggest", "toc.follow", "toc.permalink"], "search": "../../assets/javascripts/workers/search.7a47a382.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.e71a0d61.min.js"></script>
+      
+    
+  </body>
+</html>
