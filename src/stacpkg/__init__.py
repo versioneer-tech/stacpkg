@@ -3,4 +3,9 @@
 
 """Arrow-native STAC asset lock packaging."""
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("stacpkg")
+except PackageNotFoundError:
+    __version__ = "0+unknown"

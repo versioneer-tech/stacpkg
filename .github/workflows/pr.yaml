@@ -23,6 +23,7 @@ jobs:
       - name: Clone the code
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Python 3.13
@@ -49,6 +50,7 @@ jobs:
       - name: Clone the code
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Python 3.13
@@ -75,6 +77,7 @@ jobs:
       - name: Clone the code
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Python 3.13
@@ -102,6 +105,7 @@ jobs:
       - name: Clone the code
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Python 3.13
