@@ -116,7 +116,7 @@ def test_python_test_from_usecase_runs_shell_commands_and_assertions(tmp_path: P
     usecase = _parse(
         tmp_path,
         [
-            "# title: OpenAerialMap Provider Package with Asset Bytes",
+            "# title: OpenAerialMap Condensed Package Flow",
             "# test: test_openaerialmap_provider_package",
             "# test-setup: openaerialmap-items openaerialmap-2025.items.parquet --item-count 3",
             "stacpkg items from-parquet openaerialmap-2025.items.parquet --providers ODM \\",
@@ -131,7 +131,7 @@ def test_python_test_from_usecase_runs_shell_commands_and_assertions(tmp_path: P
             "# test-assert: package-items openaerialmap-provider.pkg 1",
             "# test-assert: asset-lock-store openaerialmap-provider.assets.lock.parquet file",
         ],
-        name="openaerialmap-provider-search-package.sh",
+        name="openaerialmap-condensed-package.sh",
     )
 
     python = GENERATOR.python_test_from_usecase(usecase)
@@ -258,13 +258,10 @@ def test_repository_usecase_sources_all_generate_python_tests() -> None:
     usecases = [GENERATOR.parse_usecase_shell(source) for source in sorted(source_dir.glob("*.sh"))]
 
     assert {usecase.slug for usecase in usecases} == {
-        "asset-handover-to-recipient-storage",
         "cdse-stac-to-geoparquet",
         "hls2-vienna-s3-package",
         "openaerialmap-package-handover-to-recipient-storage",
-        "openaerialmap-provider-search-package",
-        "openaerialmap-s3-alternate-package",
-        "reproducible-data-inputs",
+        "openaerialmap-package-inputs-and-relocation",
     }
     assert [usecase.slug for usecase in usecases if not usecase.generate_test] == []
     assert [usecase.slug for usecase in usecases if not _has_test_assertion(usecase)] == []
@@ -294,6 +291,34 @@ def test_generate_usecase_tests_removes_stale_generated_tests(tmp_path: Path) ->
     assert tests == [test_dir / "test_generated_small_flow.py"]
     assert (test_dir / "test_generated_small_flow.py").exists()
     assert not (test_dir / "test_generated_stale.py").exists()
+
+
+def test_generate_usecase_artifacts_removes_stale_generated_markdown(tmp_path: Path) -> None:
+    source_dir = tmp_path / "docs" / "usecases"
+    markdown_dir = tmp_path / "docs" / "generated" / "usecases"
+    test_dir = tmp_path / "tests" / "usecases"
+    markdown_dir.mkdir(parents=True)
+    (markdown_dir / "stale-flow.md").write_text("# Stale\n", encoding="utf-8")
+    _source(
+        source_dir,
+        "small-flow.sh",
+        [
+            "# title: Small Flow",
+            "# test-setup: openaerialmap-items source.items.parquet --item-count 3",
+            "# test-assert: file-exists source.items.parquet",
+        ],
+    )
+
+    artifacts = GENERATOR.generate_usecase_artifacts(
+        source_dir=source_dir,
+        markdown_dir=markdown_dir,
+        test_dir=test_dir,
+    )
+
+    assert artifacts[0].markdown == markdown_dir / "small-flow.md"
+    assert (markdown_dir / "index.md").exists()
+    assert (markdown_dir / "small-flow.md").exists()
+    assert not (markdown_dir / "stale-flow.md").exists()
 
 
 def test_unsupported_test_directives_fail_loudly(tmp_path: Path) -> None:

@@ -18,6 +18,7 @@ DEFAULT_MARKDOWN_DIR = REPO_ROOT / "docs" / "generated" / "usecases"
 DEFAULT_TEST_DIR = REPO_ROOT / "tests" / "usecases"
 GENERATOR_ID = "scripts/generate_usecase_tests.py"
 GENERATED_TEST_PATTERN = "test_generated_*.py"
+GENERATED_MARKDOWN_PATTERN = "*.md"
 
 _DIRECTIVE_RE = re.compile(r"^#\s*([a-z][a-z0-9_-]*):\s*(.*)$")
 _TITLE_WORDS = {
@@ -235,22 +236,26 @@ def generate_usecase_artifacts(
     write_tests: bool = True,
 ) -> list[GeneratedArtifact]:
     artifacts: list[GeneratedArtifact] = []
+    generated_markdown: list[Path] = []
     generated_tests: list[Path] = []
     sources_and_usecases = [
         (source, parse_usecase_shell(source)) for source in sorted(source_dir.glob(source_pattern))
     ]
     usecases = [usecase for _, usecase in sources_and_usecases]
+    index_path = markdown_dir / "index.md"
     if not check:
         _write_or_check(
-            markdown_dir / "index.md",
+            index_path,
             markdown_index_from_usecases(usecases),
             check=False,
         )
+        generated_markdown.append(index_path)
     for source, usecase in sources_and_usecases:
         markdown_path = markdown_dir / f"{usecase.slug}.md"
         test_path = test_dir / _test_filename(usecase)
         if not check:
             _write_or_check(markdown_path, markdown_from_usecase(usecase), check=False)
+            generated_markdown.append(markdown_path)
         else:
             markdown_from_usecase(usecase)
         if usecase.generate_test:
@@ -261,6 +266,8 @@ def generate_usecase_artifacts(
             _write_or_check(test_path, test_text, check=check)
             generated_tests.append(test_path)
         artifacts.append(GeneratedArtifact(source=source, markdown=markdown_path, test=test_path))
+    if not check:
+        _prune_generated_markdown(markdown_dir, keep=generated_markdown)
     if write_tests and not check:
         _prune_generated_tests(test_dir, keep=generated_tests)
     return artifacts
@@ -432,6 +439,15 @@ def _prune_generated_tests(test_dir: Path, *, keep: list[Path]) -> None:
         return
     keep_names = {path.name for path in keep}
     for path in test_dir.glob(GENERATED_TEST_PATTERN):
+        if path.name not in keep_names:
+            path.unlink()
+
+
+def _prune_generated_markdown(markdown_dir: Path, *, keep: list[Path]) -> None:
+    if not markdown_dir.exists():
+        return
+    keep_names = {path.name for path in keep}
+    for path in markdown_dir.glob(GENERATED_MARKDOWN_PATTERN):
         if path.name not in keep_names:
             path.unlink()
 

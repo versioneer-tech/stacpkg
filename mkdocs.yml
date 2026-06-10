@@ -14,10 +14,7 @@ nav:
   - Use Cases:
     - Overview: generated/usecases/index.md
     - CDSE STAC To GeoParquet: generated/usecases/cdse-stac-to-geoparquet.md
-    - OpenAerialMap Reproducible Data Inputs: generated/usecases/reproducible-data-inputs.md
-    - OpenAerialMap S3 Alternate Package: generated/usecases/openaerialmap-s3-alternate-package.md
-    - OpenAerialMap Provider Package with Asset Bytes: generated/usecases/openaerialmap-provider-search-package.md
-    - OpenAerialMap Asset Handover to Recipient Storage: generated/usecases/asset-handover-to-recipient-storage.md
+    - OpenAerialMap Package Inputs and Relocation: generated/usecases/openaerialmap-package-inputs-and-relocation.md
     - OpenAerialMap Package Handover to Recipient Storage: generated/usecases/openaerialmap-package-handover-to-recipient-storage.md
     - HLS2 Vienna S3 Package: generated/usecases/hls2-vienna-s3-package.md
   - Architecture:

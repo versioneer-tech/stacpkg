@@ -359,6 +359,6 @@ expanded the same workflow with materialized checkpoints. The package now has:
 - an OCI-distributable package that can be pushed and pulled.
 
 Related OpenAerialMap package examples live in the generated
-[`OpenAerialMap Provider Package with Asset Bytes`](../generated/usecases/openaerialmap-provider-search-package.md)
-and [`OpenAerialMap S3 Alternate Package`](../generated/usecases/openaerialmap-s3-alternate-package.md)
+[`OpenAerialMap Package Inputs and Relocation`](../generated/usecases/openaerialmap-package-inputs-and-relocation.md)
+and [`OpenAerialMap Package Handover to Recipient Storage`](../generated/usecases/openaerialmap-package-handover-to-recipient-storage.md)
 use case pages.
