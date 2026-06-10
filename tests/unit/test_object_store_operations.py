@@ -827,13 +827,13 @@ def test_assets_copy_and_project_items_pipeline(tmp_path):
     copied_path = tmp_path / "asset-lock.parquet"
     projected_items_path = tmp_path / "projected.items.parquet"
 
-    # CLI equivalent: stacpkg items from-parquet source.items.parquet | stacpkg asset-lock derive | stacpkg asset-lock to-parquet source.assets.lock.parquet
+    # CLI example: stacpkg items from-parquet source.items.parquet | stacpkg asset-lock derive | stacpkg asset-lock to-parquet source.assets.lock.parquet
     write_parquet(_copy_test_assets(read_parquet(source)), assets_path)
     # Internal destination rows are prepared before relocation so the transfer can match by item and asset key.
     write_parquet(
         plan_copy_assets(read_parquet(assets_path), target=destination.as_uri()), planned_path
     )
-    # CLI equivalent: stacpkg asset-lock from-parquet source.assets.lock.parquet | stacpkg asset-lock relocate --destination-lock planned.assets.lock.parquet --max-workers 8 --memory-limit-bytes 20KiB --chunk-size-bytes 4KiB | stacpkg asset-lock to-parquet asset-lock.parquet
+    # CLI example: stacpkg asset-lock from-parquet source.assets.lock.parquet | stacpkg asset-lock relocate --destination-lock planned.assets.lock.parquet --max-workers 8 --memory-limit-bytes 20KiB --chunk-size-bytes 4KiB | stacpkg asset-lock to-parquet asset-lock.parquet
     write_parquet(
         copy_assets(
             read_parquet(assets_path),
@@ -845,7 +845,7 @@ def test_assets_copy_and_project_items_pipeline(tmp_path):
         ),
         copied_path,
     )
-    # CLI equivalent: stacpkg items from-parquet source.items.parquet | stacpkg items add-alternate --asset-lock asset-lock.arrow --alternate-key mirrored | stacpkg items to-parquet projected.items.parquet
+    # CLI example: stacpkg items from-parquet source.items.parquet | stacpkg items add-alternate --asset-lock asset-lock.arrow --alternate-key mirrored | stacpkg items to-parquet projected.items.parquet
     write_parquet(
         project_item_assets(
             read_parquet(source),

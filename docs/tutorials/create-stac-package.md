@@ -358,5 +358,7 @@ expanded the same workflow with materialized checkpoints. The package now has:
 - an enriched items table and a package inspection summary;
 - an OCI-distributable package that can be pushed and pulled.
 
-Related executable coverage for OpenAerialMap packaging lives in
-[`tests/e2e/test_usecase_openaerialmap_s3_alternate_package.py`](https://github.com/versioneer-tech/stacpkg/blob/main/tests/e2e/test_usecase_openaerialmap_s3_alternate_package.py).
+Related OpenAerialMap package examples live in the generated
+[`OpenAerialMap Provider Package with Asset Bytes`](../generated/usecases/openaerialmap-provider-search-package.md)
+and [`OpenAerialMap S3 Alternate Package`](../generated/usecases/openaerialmap-s3-alternate-package.md)
+use case pages.

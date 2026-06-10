@@ -9,8 +9,9 @@ duplicating them in this README.
 | Folder | Purpose |
 | --- | --- |
 | [`unit/`](unit/) | Fast unit tests and small fixture-backed checks. No network, Docker, kind, Kubernetes, S3 store, or registry. |
+| [`usecases/`](usecases/) | Tests for `docs/usecases` workflows. Materialized Python tests are named `test_generated_*.py`, ignored by git, and created before pytest collection. |
 | [`integration/`](integration/) | Local cross-library checks using optional tools such as `rustac`, DuckDB, and `geoparquet-io`/`gpio`. No deployed services. |
-| [`e2e/`](e2e/) | End-to-end user journeys against local kind services. Use `test_usecase_*.py` for user-facing flows and `test_performance_*.py` for heavier checks. |
+| [`e2e/`](e2e/) | Shared e2e helpers plus performance and other infra-backed tests that are not docs/usecase workflows. |
 | [`setup/`](setup/) | Kubernetes manifests for the local e2e MinIO stores and OCI registry. |
 | [`data/`](data/) | Static OpenAerialMap fixtures and fixture helper constants. |
 
@@ -21,8 +22,15 @@ applies the manifests in [`tests/setup/`](setup/), starts port-forwards for the
 MinIO stores and registry, exports the expected environment variables, and then
 runs pytest.
 
-MkDocs notebooks are generated from [`tests/e2e/`](e2e/) files matching
-`test_usecase_*.py` only.
+Use case docs and generated tests are generated from shell sources in
+[`docs/usecases/`](../docs/usecases/) matching `*.sh`. The generated Markdown
+pages are written under ignored `docs/generated/usecases/` during docs builds,
+and `pytest tests/usecases` creates matching Python tests that call the library
+methods behind each supported CLI pipeline before collection.
+
+Generated usecase tests are kept fast and local. Infra-backed service tests live
+under [`tests/e2e/`](e2e/); no `test_usecase_*.py` files should live under
+[`tests/usecases/`](usecases/).
 
 ## OpenAerialMap Fixtures
 

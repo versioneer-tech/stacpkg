@@ -21,6 +21,7 @@ s3store2_secret_access_key="${STACPKG_E2E_S3STORE2_SECRET_ACCESS_KEY:-${STACPKG_
 registry_port="${STACPKG_E2E_REGISTRY_PORT:-15000}"
 pytest_mark="${STACPKG_E2E_PYTEST_MARK:-e2e and not performance}"
 pytest_log_level="${STACPKG_E2E_LOG_LEVEL:-INFO}"
+render_docs="${STACPKG_E2E_RENDER_DOCS:-0}"
 pytest_targets=("$@")
 if [[ "${#pytest_targets[@]}" -eq 0 ]]; then
   pytest_targets=(tests/e2e)
@@ -37,7 +38,12 @@ log "configuration: pytest_targets=${pytest_targets[*]}"
 
 if command -v kind >/dev/null 2>&1; then
   log "kind found: $(command -v kind)"
-  if clusters="$(kind get clusters 2>/dev/null)" && ! grep -Fxq "$cluster" <<<"$clusters"; then
+  if ! clusters="$(kind get clusters 2>&1)"; then
+    log "failed to list kind clusters; ensure Docker is available for kind"
+    printf '%s\n' "$clusters" >&2
+    exit 1
+  fi
+  if ! grep -Fxq "$cluster" <<<"$clusters"; then
     log "creating kind cluster: ${cluster}"
     kind create cluster --name "$cluster"
   else
@@ -178,17 +184,17 @@ E2E endpoints:
 EOF
 
 log "running pytest e2e suite"
-uv run pytest \
+uv run --group integration pytest \
   "${pytest_targets[@]}" \
   -m "$pytest_mark" \
   -o log_cli=true \
   -o "log_cli_level=${pytest_log_level}"
 
-if [[ "${STACPKG_E2E_RENDER_NOTEBOOKS:-0}" == "1" ]]; then
-  log "rendering docs with executed e2e notebooks"
-  STACPKG_DOCS_EXECUTE_NOTEBOOKS=1 \
-    STACPKG_DOCS_EXECUTE_E2E_NOTEBOOKS=1 \
-    uv run mkdocs build --strict
+if [[ "$render_docs" == "1" ]]; then
+  log "generating shell-sourced use case docs"
+  uv run python scripts/generate_usecase_tests.py --no-tests
+  log "rendering docs with generated use case pages"
+  uv run --group docs --group integration mkdocs build --strict
 fi
 
 if [[ "${STACPKG_E2E_KEEP_FORWARD:-0}" == "1" ]]; then

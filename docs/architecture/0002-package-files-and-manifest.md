@@ -57,6 +57,12 @@ copied into the package live under `assets/` in the local package. Their
 identity and package-relative location stay in `assets.lock.parquet`, with
 `store_type=file` and `key` pointing at the package path.
 
+Asset inclusion is opt-in because most Earth Observation packages should not
+copy large external assets by default. It is useful for offline handover,
+air-gapped delivery, and small examples where the bytes should travel with the
+metadata. The included copy still reuses the asset-lock and relocation model
+instead of adding a separate staging contract.
+
 Use typed OCI layers for registry transport. No separate metadata JSON file or
 custom OCI config JSON is required to rebuild the package.
 

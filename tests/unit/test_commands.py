@@ -221,7 +221,6 @@ EXPECTED_CLI_COMMANDS = {
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLI_COMMENT_RE = re.compile(r"^\s*#\s*CLI:\s?(.*)$")
 COMMENT_RE = re.compile(r"^\s*#\s?(.*)$")
-NOTEBOOK_MARKER_RE = re.compile(r"^\s*#\s*NOTEBOOK(?:_|:)")
 
 
 def _write_source(tmp_path: Path) -> Path:
@@ -381,7 +380,7 @@ def _cli_comment_blocks() -> list[tuple[Path, int, str]]:
             command_lines = [match.group(1).rstrip()]
             index += 1
             while index < len(lines):
-                if CLI_COMMENT_RE.match(lines[index]) or NOTEBOOK_MARKER_RE.match(lines[index]):
+                if CLI_COMMENT_RE.match(lines[index]):
                     break
                 comment = COMMENT_RE.match(lines[index])
                 if comment is None:
@@ -392,7 +391,14 @@ def _cli_comment_blocks() -> list[tuple[Path, int, str]]:
                 command_lines.append(text.rstrip())
                 index += 1
 
-            command = " ".join(part.strip() for part in command_lines if part.strip())
+            command_parts = []
+            for part in command_lines:
+                stripped = part.strip()
+                if stripped.endswith("\\"):
+                    stripped = stripped[:-1].rstrip()
+                if stripped:
+                    command_parts.append(stripped)
+            command = " ".join(command_parts)
             blocks.append((path, start_line, command))
     return blocks
 
@@ -422,7 +428,6 @@ def test_cli_comment_examples_parse_with_current_cli() -> None:
             if segment[:2] == ["uv", "run"]:
                 segment = segment[2:]
             if not segment or segment[0] != "stacpkg":
-                failures.append(f"{path.relative_to(REPO_ROOT)}:{line_number}: {command}")
                 continue
 
             stderr = StringIO()

@@ -23,3 +23,12 @@ def test_kind_s3_store_runner_uses_distinct_minio_credentials() -> None:
     assert "minioadmin2" in script
     assert "STACPKG_S3_ACCESS_KEY_ID_STACPKG_E2E_S3STORE1" in script
     assert "STACPKG_S3_ACCESS_KEY_ID_STACPKG_E2E_S3STORE2" in script
+    assert "failed to list kind clusters" in script
+    assert "ensure Docker is available for kind" in script
+    assert "pytest_targets=(tests/e2e)" in script
+    assert "pytest_targets=(tests/e2e tests/usecases)" not in script
+    assert "uv run --group integration pytest" in script
+    assert "STACPKG_E2E_RENDER_DOCS" in script
+    assert "STACPKG_E2E_RENDER_NOTEBOOKS" not in script
+    assert "uv run python scripts/generate_usecase_tests.py --no-tests" in script
+    assert "uv run --group docs --group integration mkdocs build --strict" in script
