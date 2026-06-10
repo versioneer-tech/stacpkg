@@ -43,4 +43,5 @@ repos:
         name: Copyright header
         entry: ./scripts/copyright.py
         language: system
-        types_or: [python, yaml, toml]
+        files: ^(Dockerfile|Makefile|scripts/.*\.sh|.*\.(py|toml|ya?ml))$
+        types_or: [dockerfile, makefile, python, shell, toml, yaml]
