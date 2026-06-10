@@ -6,6 +6,7 @@
 *.swo
 *~
 site/
+docs/generated/
 
 # Environment files
 .env*
@@ -26,3 +27,4 @@ build/
 dist/
 venv/
 .venv/
+*_generated_*.py

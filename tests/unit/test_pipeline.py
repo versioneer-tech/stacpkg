@@ -176,7 +176,7 @@ def test_library_arrow_pipeline(tmp_path):
     source = _write_source(tmp_path)
     lock_path = tmp_path / "source.assets.lock.parquet"
 
-    # CLI equivalent: stacpkg items from-json source.json | stacpkg asset-lock derive | stacpkg asset-lock to-parquet source.assets.lock.parquet
+    # CLI example: stacpkg items from-json source.json | stacpkg asset-lock derive | stacpkg asset-lock to-parquet source.assets.lock.parquet
     write_parquet(derive_asset_lock(read_stac_json(source)), lock_path)
 
     lock = read_parquet(lock_path)

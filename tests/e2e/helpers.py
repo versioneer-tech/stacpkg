@@ -25,7 +25,7 @@ LOGGER = logging.getLogger(__name__)
 S3STORE1_BUCKET = "stacpkg-e2e-s3store1"
 S3STORE2_BUCKET = "stacpkg-e2e-s3store2"
 
-# AWS CLI equivalents for the library helpers below:
+# AWS CLI examples for the library helpers below:
 # aws --endpoint-url "$ENDPOINT" s3api create-bucket --bucket "$BUCKET"
 # aws --endpoint-url "$ENDPOINT" s3api put-object --bucket "$BUCKET" --key "$KEY" --body "$FILE"
 # aws --endpoint-url "$ENDPOINT" s3api head-object --bucket "$BUCKET" --key "$KEY"

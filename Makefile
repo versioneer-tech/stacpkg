@@ -18,7 +18,7 @@ sync: ## Install all uv dependency groups.
 test: test-unit ## Run the default fast unit test suite.
 
 .PHONY: test-all
-test-all: pre-commit docs test-unit test-integration test-e2e-full ## Run all local quality gates, including full e2e/performance.
+test-all: pre-commit docs test-unit test-usecases test-integration test-e2e-full ## Run all local quality gates, including full e2e/performance.
 
 .PHONY: test-unit
 test-unit: ## Run fast unit tests only.
@@ -27,6 +27,10 @@ test-unit: ## Run fast unit tests only.
 .PHONY: test-integration
 test-integration: ## Run local integration tests with optional cross-tool dependencies.
 	uv run --group integration pytest tests/integration -m integration
+
+.PHONY: test-usecases
+test-usecases: ## Generate and run fast docs-sourced use case tests.
+	uv run pytest tests/usecases -m usecase
 
 .PHONY: test-e2e
 test-e2e: ## Run CI-sized end-to-end tests against a local kind S3 store setup.
@@ -42,8 +46,10 @@ pre-commit: ## Run all pre-commit hooks.
 
 .PHONY: docs
 docs: ## Build docs strictly.
-	uv run mkdocs build --strict
+	uv run python scripts/generate_usecase_tests.py --no-tests
+	uv run --group docs mkdocs build --strict
 
 .PHONY: docs-serve
 docs-serve: ## Serve docs locally.
-	uv run mkdocs serve
+	uv run python scripts/generate_usecase_tests.py --no-tests
+	uv run --group docs mkdocs serve

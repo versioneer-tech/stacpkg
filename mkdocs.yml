@@ -11,11 +11,22 @@ nav:
   - Tutorials:
     - Create STAC Package: tutorials/create-stac-package.md
     - Relocate Assets: tutorials/relocate-assets.md
+  - Use Cases:
+    - Overview: generated/usecases/index.md
+    - CDSE STAC To GeoParquet: generated/usecases/cdse-stac-to-geoparquet.md
+    - OpenAerialMap Reproducible Data Inputs: generated/usecases/reproducible-data-inputs.md
+    - OpenAerialMap S3 Alternate Package: generated/usecases/openaerialmap-s3-alternate-package.md
+    - OpenAerialMap Provider Package with Asset Bytes: generated/usecases/openaerialmap-provider-search-package.md
+    - OpenAerialMap Asset Handover to Recipient Storage: generated/usecases/asset-handover-to-recipient-storage.md
+    - OpenAerialMap Package Handover to Recipient Storage: generated/usecases/openaerialmap-package-handover-to-recipient-storage.md
+    - HLS2 Vienna S3 Package: generated/usecases/hls2-vienna-s3-package.md
   - Architecture:
+    - Overview: architecture/index.md
     - ADR-001 Arrow IPC Streams for Pipelines and CLI: architecture/0001-arrow-ipc-streams-for-pipelines-and-cli.md
     - ADR-002 Package Files and OCI Layers: architecture/0002-package-files-and-manifest.md
     - ADR-003 Asset Lock Row Structure: architecture/0003-asset-lock-row-structure.md
     - ADR-004 Asset-Lock Checksum Facts and STAC Projection: architecture/0004-asset-lock-checksum-facts-and-stac-projection.md
+    - ADR-005 Asset-Lock Driven STAC Projection: architecture/0005-asset-lock-driven-stac-projection.md
   - Reference:
     - CLI: reference-guides/cli.md
     - Items: reference-guides/items.md

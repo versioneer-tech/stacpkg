@@ -16,7 +16,14 @@ def _source_dirs(path: Path) -> set[str]:
 
 
 def test_tests_tree_has_documented_top_level_source_folders() -> None:
-    assert _source_dirs(TESTS_ROOT) == {"data", "e2e", "integration", "setup", "unit"}
+    assert _source_dirs(TESTS_ROOT) == {
+        "data",
+        "e2e",
+        "integration",
+        "setup",
+        "unit",
+        "usecases",
+    }
 
 
 def test_tests_tree_has_single_readme_at_root() -> None:
@@ -31,9 +38,21 @@ def test_e2e_tests_are_flattened_and_named_by_kind() -> None:
     assert _source_dirs(TESTS_ROOT / "e2e") == set()
 
     e2e_tests = {path.name for path in (TESTS_ROOT / "e2e").glob("test_*.py")}
-    assert any(name.startswith("test_usecase_") for name in e2e_tests)
     assert any(name.startswith("test_performance_") for name in e2e_tests)
-    assert all(name.startswith(("test_usecase_", "test_performance_")) for name in e2e_tests)
+    assert all(name.startswith("test_performance_") for name in e2e_tests)
+
+
+def test_docs_usecase_tests_live_under_usecases() -> None:
+    usecase_tests = {path.name for path in (TESTS_ROOT / "usecases").glob("test_*.py")}
+
+    assert all(name.startswith("test_generated_") for name in usecase_tests)
+    assert not any(
+        path.name.startswith("test_usecase_") for path in (TESTS_ROOT / "e2e").glob("test_*.py")
+    )
+    assert not any(
+        path.name.startswith("test_usecase_")
+        for path in (TESTS_ROOT / "usecases").glob("test_*.py")
+    )
 
 
 def test_setup_contains_kind_service_manifests() -> None:
