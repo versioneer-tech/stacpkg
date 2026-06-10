@@ -173,7 +173,7 @@ jobs:
         run: uv sync --group docs --frozen
 
       - name: Build docs
-        run: uv run mkdocs build --strict
+        run: make docs
 
       - name: Set up Git identity
         run: |

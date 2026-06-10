@@ -10,7 +10,6 @@ nav:
   - Home: index.md
   - Tutorials:
     - Create STAC Package: tutorials/create-stac-package.md
-    - CDSE STAC Search To GeoParquet: tutorials/cdse-stac-to-geoparquet.md
     - Relocate Assets: tutorials/relocate-assets.md
   - Use Cases:
     - Overview: generated/usecases/index.md

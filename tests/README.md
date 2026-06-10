@@ -25,8 +25,8 @@ runs pytest.
 Use case docs and generated tests are generated from shell sources in
 [`docs/usecases/`](../docs/usecases/) matching `*.sh`. The generated Markdown
 pages are written under ignored `docs/generated/usecases/` during docs builds,
-and `pytest tests/usecases` creates matching Python tests that call the library
-methods behind each supported CLI pipeline before collection.
+and `pytest tests/usecases` creates matching Python tests that execute the shell
+commands with local fixtures and hidden `test-assert` checks before collection.
 
 Generated usecase tests are kept fast and local. Infra-backed service tests live
 under [`tests/e2e/`](e2e/); no `test_usecase_*.py` files should live under

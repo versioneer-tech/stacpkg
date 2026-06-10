@@ -40,13 +40,17 @@ class Command(NamedTuple):
     text: str
 
 
+class TestCommand(NamedTuple):
+    text: str
+
+
 class UsecaseSource(NamedTuple):
     path: Path
     slug: str
     title: str
     test_name: str
     generate_test: bool
-    events: tuple[Markdown | Command, ...]
+    events: tuple[Markdown | Command | TestCommand, ...]
 
 
 class GeneratedArtifact(NamedTuple):
@@ -59,183 +63,11 @@ class UnsupportedCommand(ValueError):
     pass
 
 
-class Codegen:
-    def __init__(self) -> None:
-        self.imports: set[str] = set()
-        self.lines: list[str] = []
-        self.asset_lock_parquet_by_arrow: dict[str, str] = {}
-        self._counter: dict[str, int] = {}
-
-    def emit(self, command: str) -> None:
-        tokens = _command_tokens(command)
-        if not tokens:
-            return
-        if tokens[0] == "setup-openaerialmap-items":
-            self._setup_openaerialmap_items(tokens)
-            return
-        if tokens[0].startswith("assert-"):
-            self._assertion(tokens)
-            return
-        segments = _pipeline_segments(tokens)
-        if segments and segments[0][:1] == ["stacpkg"]:
-            self._stacpkg_pipeline(segments, command)
-            return
-        raise UnsupportedCommand(f"unsupported usecase command: {command}")
-
-    def _setup_openaerialmap_items(self, tokens: list[str]) -> None:
-        if len(tokens) < 2:
-            raise UnsupportedCommand("setup-openaerialmap-items requires an output path")
-        output = tokens[1]
-        item_count = _option_value(tokens, "--item-count") or "3"
-        _require_int(item_count, "--item-count")
-        self.imports.add("from stacpkg.arrow_io import write_parquet")
-        self.imports.add(
-            "from tests.unit.openaerialmap_fixture import localized_openaerialmap_items"
-        )
-        self.lines.extend(
-            [
-                "write_parquet(",
-                f"    localized_openaerialmap_items(tmp_path, item_count={item_count}),",
-                f"    _p(tmp_path, {_py_string(output)}),",
-                ")",
-            ]
-        )
-
-    def _assertion(self, tokens: list[str]) -> None:
-        name = tokens[0]
-        if name == "assert-parquet-rows" and len(tokens) == 3:
-            self._assert_parquet_rows(tokens[1], tokens[2])
-            return
-        if name == "assert-package-items" and len(tokens) == 3:
-            self._assert_parquet_rows(f"{tokens[1].rstrip('/')}/items.parquet", tokens[2])
-            return
-        if name == "assert-package-assets" and len(tokens) == 3:
-            self._assert_parquet_rows(f"{tokens[1].rstrip('/')}/assets.lock.parquet", tokens[2])
-            return
-        if name == "assert-file-exists" and len(tokens) == 2:
-            self.lines.append(f"assert _p(tmp_path, {_py_string(tokens[1])}).exists()")
-            return
-        if name == "assert-no-file" and len(tokens) == 2:
-            self.lines.append(f"assert not _p(tmp_path, {_py_string(tokens[1])}).exists()")
-            return
-        raise UnsupportedCommand(f"unsupported assertion command: {' '.join(tokens)}")
-
-    def _assert_parquet_rows(self, path: str, count: str) -> None:
-        _require_int(count, "row count")
-        self.imports.add("from stacpkg.arrow_io import read_parquet")
-        self.lines.append(f"_assert_parquet_rows(tmp_path, {_py_string(path)}, {count})")
-
-    def _stacpkg_pipeline(self, segments: list[list[str]], command: str) -> None:
-        if len(segments) == 2 and _is_items_from_parquet(segments[0]):
-            if _is_items_to_parquet(segments[1]):
-                self._items_from_parquet_to_parquet(segments[0], segments[1])
-                return
-            if _is_build(segments[1]):
-                self._items_from_parquet_to_build(segments[0], segments[1])
-                return
-        if (
-            len(segments) == 3
-            and _is_items_from_parquet(segments[0])
-            and _is_asset_lock_derive(segments[1])
-            and _is_asset_lock_to_parquet(segments[2])
-        ):
-            self._items_from_parquet_to_asset_lock(segments[0], segments[1], segments[2])
-            return
-        raise UnsupportedCommand(f"unsupported stacpkg pipeline: {command}")
-
-    def _items_from_parquet_to_parquet(
-        self,
-        source_stage: list[str],
-        output_stage: list[str],
-    ) -> None:
-        table = self._items_variable(source_stage)
-        output = output_stage[3]
-        self.imports.add("from stacpkg.geoparquet import write_items_geoparquet")
-        self.lines.append(f"write_items_geoparquet({table}, _p(tmp_path, {_py_string(output)}))")
-
-    def _items_from_parquet_to_asset_lock(
-        self,
-        source_stage: list[str],
-        derive_stage: list[str],
-        output_stage: list[str],
-    ) -> None:
-        table = self._items_variable(source_stage)
-        output = output_stage[3]
-        probe_metadata = "--no-probe-metadata" not in derive_stage
-        self.imports.add("from stacpkg.arrow_io import write_parquet")
-        self.imports.add("from stacpkg.assets import derive_asset_lock")
-        asset_lock = self._var("asset_lock")
-        self.lines.extend(
-            [
-                f"{asset_lock} = derive_asset_lock({table}, probe_metadata={probe_metadata})",
-                "write_parquet(",
-                f"    {asset_lock},",
-                f"    _p(tmp_path, {_py_string(output)}),",
-                ")",
-            ]
-        )
-        self.asset_lock_parquet_by_arrow[_arrow_name_for_parquet(output)] = output
-
-    def _items_from_parquet_to_build(
-        self,
-        source_stage: list[str],
-        build_stage: list[str],
-    ) -> None:
-        input_path = source_stage[3]
-        package_dir = build_stage[2]
-        self.imports.add("from stacpkg.dataset import build_package")
-        args = [
-            f"_p(tmp_path, {_py_string(input_path)})",
-            f"_p(tmp_path, {_py_string(package_dir)})",
-        ]
-        kwargs = []
-        asset_lock = _option_value(build_stage, "--asset-lock")
-        if asset_lock is not None:
-            self.imports.add("from stacpkg.arrow_io import read_parquet")
-            asset_lock_parquet = self.asset_lock_parquet_by_arrow.get(asset_lock, asset_lock)
-            if asset_lock_parquet.endswith(".arrow"):
-                asset_lock_parquet = asset_lock_parquet.removesuffix(".arrow") + ".parquet"
-            asset_lock_var = self._var("asset_lock")
-            self.lines.append(
-                f"{asset_lock_var} = read_parquet(_p(tmp_path, {_py_string(asset_lock_parquet)}))"
-            )
-            kwargs.append(f"asset_lock={asset_lock_var}")
-        if "--include-assets" in build_stage:
-            kwargs.append("include_assets=True")
-        call_args = args + kwargs
-        self.lines.extend(["build_package(", *(f"    {arg}," for arg in call_args), ")"])
-
-    def _items_variable(self, stage: list[str]) -> str:
-        input_path = stage[3]
-        self.imports.add("from stacpkg.arrow_io import read_parquet")
-        items = self._var("items")
-        providers = _option_values(stage, "--providers")
-        if providers:
-            self.imports.add("from stacpkg.items import filter_items")
-            provider_set = "{" + ", ".join(_py_string(v) for v in providers) + "}"
-            self.lines.extend(
-                [
-                    f"{items} = filter_items(",
-                    f"    read_parquet(_p(tmp_path, {_py_string(input_path)})),",
-                    f"    providers={provider_set},",
-                    ")",
-                ]
-            )
-            return items
-        self.lines.append(f"{items} = read_parquet(_p(tmp_path, {_py_string(input_path)}))")
-        return items
-
-    def _var(self, prefix: str) -> str:
-        next_value = self._counter.get(prefix, 0) + 1
-        self._counter[prefix] = next_value
-        return f"{prefix}_{next_value}"
-
-
 def parse_usecase_shell(path: Path) -> UsecaseSource:
     title = _title_from_slug(path.stem)
     test_name = f"test_{path.stem.replace('-', '_')}"
     generate_test = True
-    events: list[Markdown | Command] = []
+    events: list[Markdown | Command | TestCommand] = []
     command_lines: list[str] = []
 
     def flush_command() -> None:
@@ -245,7 +77,12 @@ def parse_usecase_shell(path: Path) -> UsecaseSource:
 
     for raw_line in path.read_text(encoding="utf-8").splitlines():
         stripped = raw_line.strip()
-        if not stripped or stripped.startswith("#!") or stripped == "set -euo pipefail":
+        if not stripped:
+            flush_command()
+            if events and isinstance(events[-1], Markdown) and events[-1].text:
+                events.append(Markdown(""))
+            continue
+        if stripped.startswith("#!") or stripped == "set -euo pipefail":
             flush_command()
             continue
         if stripped.startswith("#"):
@@ -261,6 +98,12 @@ def parse_usecase_shell(path: Path) -> UsecaseSource:
                         generate_test = False
                         continue
                     test_name = value
+                    continue
+                if key in {"test-setup", "setup"}:
+                    events.append(TestCommand(_directive_command(value, "setup")))
+                    continue
+                if key in {"test-assert", "assert"}:
+                    events.append(TestCommand(_directive_command(value, "assert")))
                     continue
                 if key in {"description", "mark"}:
                     continue
@@ -289,11 +132,23 @@ def markdown_from_usecase(usecase: UsecaseSource) -> str:
         f"<!-- Generated from `{_display_path(usecase.path)}` by {GENERATOR_ID}; do not edit by hand. -->",
         "",
     ]
+    markdown_lines: list[str] = []
+
+    def flush_markdown() -> None:
+        if markdown_lines:
+            lines.extend(markdown_lines)
+            lines.append("")
+            markdown_lines.clear()
+
     for event in usecase.events:
         if isinstance(event, Markdown):
-            lines.extend([event.text, ""])
+            markdown_lines.append(event.text)
+            continue
+        flush_markdown()
+        if isinstance(event, TestCommand):
             continue
         lines.extend(["```bash", event.text, "```", ""])
+    flush_markdown()
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -318,28 +173,51 @@ def markdown_index_from_usecases(usecases: list[UsecaseSource]) -> str:
 def python_test_from_usecase(usecase: UsecaseSource) -> str:
     if not usecase.generate_test:
         raise UnsupportedCommand(f"{_display_path(usecase.path)} is marked as docs-only")
-    codegen = Codegen()
-    for event in usecase.events:
-        if isinstance(event, Command):
-            codegen.emit(event.text)
-    codegen.imports.add("from stacpkg.arrow_io import read_parquet")
+    if not _has_test_assertion(usecase):
+        raise UnsupportedCommand(
+            f"{_display_path(usecase.path)} must include at least one # test-assert directive"
+        )
 
-    imports = [
-        "from pathlib import Path",
-        "",
-        "import pytest",
-        *sorted(codegen.imports),
-    ]
-    body = _indent("\n".join(codegen.lines), "    ")
+    body_lines = ["shell = UsecaseShell(tmp_path)"]
+    body_lines.extend(_setup_calls(usecase))
+    shell_script = "\n\n".join(event.text for event in usecase.events if isinstance(event, Command))
+    if shell_script:
+        body_lines.extend(
+            ["shell.run(", _indent(_python_multiline_string(shell_script), "    "), ")"]
+        )
+    body_lines.extend(_assertion_calls(usecase))
+    body = _indent("\n".join(body_lines), "    ")
+
     return (
         "# Copyright 2026, Versioneer (https://versioneer.at)\n"
         "# SPDX-License-Identifier: Apache-2.0\n\n"
         f"# Generated from `{_display_path(usecase.path)}` by {GENERATOR_ID}; do not edit by hand.\n\n"
-        "from __future__ import annotations\n\n" + "\n".join(imports) + "\n\n\n"
-        "def _p(tmp_path: Path, value: str) -> Path:\n"
-        '    return tmp_path / value.rstrip("/")\n\n\n'
-        "def _assert_parquet_rows(tmp_path: Path, value: str, count: int) -> None:\n"
-        "    assert read_parquet(_p(tmp_path, value)).num_rows == count\n\n\n"
+        "from __future__ import annotations\n\n"
+        "from pathlib import Path\n\n"
+        "import pytest\n\n"
+        "from tests.usecases.runtime import (\n"
+        "    UsecaseShell,\n"
+        "    assert_asset_lock_keys,\n"
+        "    assert_asset_lock_store,\n"
+        "    assert_file_exists,\n"
+        "    assert_item_alternate_hrefs,\n"
+        "    assert_item_asset_hrefs,\n"
+        "    assert_item_provider_names,\n"
+        "    assert_no_file,\n"
+        "    assert_package_asset_files,\n"
+        "    assert_package_assets,\n"
+        "    assert_package_file,\n"
+        "    assert_package_items,\n"
+        "    assert_parquet_columns,\n"
+        "    assert_parquet_equals,\n"
+        "    assert_parquet_rows,\n"
+        "    setup_file,\n"
+        "    setup_openaerialmap_provider_asset_lock,\n"
+        "    setup_openaerialmap_provider_items,\n"
+        "    setup_openaerialmap_asset_lock,\n"
+        "    setup_openaerialmap_items,\n"
+        "    setup_openaerialmap_s3_items,\n"
+        ")\n\n\n"
         "@pytest.mark.usecase\n"
         f"def {usecase.test_name}(tmp_path: Path) -> None:\n"
         f"{body}\n"
@@ -406,6 +284,112 @@ def generate_usecase_tests(
     return tests
 
 
+def _setup_calls(usecase: UsecaseSource) -> list[str]:
+    return [
+        _directive_call(event.text)
+        for event in usecase.events
+        if isinstance(event, TestCommand) and event.text.startswith("setup-")
+    ]
+
+
+def _assertion_calls(usecase: UsecaseSource) -> list[str]:
+    return [
+        _directive_call(event.text)
+        for event in usecase.events
+        if isinstance(event, TestCommand) and event.text.startswith("assert-")
+    ]
+
+
+def _directive_call(command: str) -> str:
+    tokens = _command_tokens(command)
+    if not tokens:
+        raise UnsupportedCommand("empty test directive")
+
+    name = tokens[0]
+    if name == "setup-openaerialmap-items" and len(tokens) >= 2:
+        return _fixture_call("setup_openaerialmap_items", tokens)
+    if name == "setup-openaerialmap-s3-items" and len(tokens) >= 2:
+        return _fixture_call("setup_openaerialmap_s3_items", tokens)
+    if name == "setup-openaerialmap-asset-lock" and len(tokens) >= 2:
+        return _fixture_call("setup_openaerialmap_asset_lock", tokens)
+    if name == "setup-openaerialmap-provider-items" and len(tokens) >= 2:
+        return _fixture_call("setup_openaerialmap_provider_items", tokens)
+    if name == "setup-openaerialmap-provider-asset-lock" and len(tokens) >= 2:
+        return _fixture_call("setup_openaerialmap_provider_asset_lock", tokens)
+    if name == "setup-file" and len(tokens) >= 2:
+        text = _option_value(tokens, "--text") or "# Generated usecase include\n"
+        return f"setup_file(tmp_path, {_py_string(tokens[1])}, text={_py_string(text)})"
+    if name == "assert-parquet-rows" and len(tokens) == 3:
+        return _row_assertion_call("assert_parquet_rows", tokens)
+    if name == "assert-parquet-columns" and len(tokens) >= 3:
+        return _varargs_call("assert_parquet_columns", tokens[1:])
+    if name == "assert-parquet-equals" and len(tokens) == 3:
+        return _varargs_call("assert_parquet_equals", tokens[1:])
+    if name == "assert-package-items" and len(tokens) == 3:
+        return _row_assertion_call("assert_package_items", tokens)
+    if name == "assert-package-assets" and len(tokens) == 3:
+        return _row_assertion_call("assert_package_assets", tokens)
+    if name == "assert-package-file" and len(tokens) == 3:
+        return _varargs_call("assert_package_file", tokens[1:])
+    if name == "assert-package-asset-files" and len(tokens) == 3:
+        _require_int(tokens[2], "asset file count")
+        return _varargs_call("assert_package_asset_files", [tokens[1], int(tokens[2])])
+    if name == "assert-item-provider-names" and len(tokens) >= 3:
+        return _varargs_call("assert_item_provider_names", tokens[1:])
+    if name == "assert-item-asset-hrefs" and len(tokens) >= 3:
+        return _href_assertion_call("assert_item_asset_hrefs", tokens[1:])
+    if name == "assert-item-alternate-hrefs" and len(tokens) >= 4:
+        return _href_assertion_call("assert_item_alternate_hrefs", tokens[1:])
+    if name == "assert-asset-lock-keys" and len(tokens) >= 3:
+        return _varargs_call("assert_asset_lock_keys", tokens[1:])
+    if name == "assert-asset-lock-store" and len(tokens) >= 3:
+        return _asset_lock_store_call(tokens[1:])
+    if name == "assert-file-exists" and len(tokens) == 2:
+        return f"assert_file_exists(tmp_path, {_py_string(tokens[1])})"
+    if name == "assert-no-file" and len(tokens) == 2:
+        return f"assert_no_file(tmp_path, {_py_string(tokens[1])})"
+    raise UnsupportedCommand(f"unsupported test directive: {command}")
+
+
+def _fixture_call(function: str, tokens: list[str]) -> str:
+    item_count = _option_value(tokens, "--item-count") or "3"
+    _require_int(item_count, "--item-count")
+    return f"{function}(tmp_path, {_py_string(tokens[1])}, item_count={item_count})"
+
+
+def _row_assertion_call(function: str, tokens: list[str]) -> str:
+    _require_int(tokens[2], "row count")
+    return f"{function}(tmp_path, {_py_string(tokens[1])}, {tokens[2]})"
+
+
+def _varargs_call(function: str, args: list[str | int]) -> str:
+    rendered = ", ".join(_py_value(arg) for arg in args)
+    return f"{function}(tmp_path, {rendered})"
+
+
+def _href_assertion_call(function: str, args: list[str]) -> str:
+    asset_keys = _option_values(args, "--asset-key")
+    positional = _without_option_values(args, "--asset-key")
+    call = _varargs_call(function, positional)
+    if asset_keys:
+        return call[:-1] + f", asset_keys={_py_tuple(asset_keys)})"
+    return call
+
+
+def _asset_lock_store_call(args: list[str]) -> str:
+    positional = _without_option_values(args, "--container")
+    positional = _without_option_values(positional, "--key-prefix")
+    call = _varargs_call("assert_asset_lock_store", positional)
+    kwargs = []
+    if container := _option_value(args, "--container"):
+        kwargs.append(f"container={_py_string(container)}")
+    if key_prefix := _option_value(args, "--key-prefix"):
+        kwargs.append(f"key_prefix={_py_string(key_prefix)}")
+    if not kwargs:
+        return call
+    return call[:-1] + ", " + ", ".join(kwargs) + ")"
+
+
 def _write_or_check(path: Path, text: str, *, check: bool) -> None:
     if check:
         try:
@@ -436,6 +420,13 @@ def _test_filename(usecase: UsecaseSource) -> str:
     return f"test_generated_{usecase.slug.replace('-', '_')}.py"
 
 
+def _has_test_assertion(usecase: UsecaseSource) -> bool:
+    return any(
+        isinstance(event, TestCommand) and event.text.startswith("assert-")
+        for event in usecase.events
+    )
+
+
 def _prune_generated_tests(test_dir: Path, *, keep: list[Path]) -> None:
     if not test_dir.exists():
         return
@@ -450,34 +441,13 @@ def _command_tokens(command: str) -> list[str]:
     return shlex.split(text)
 
 
-def _pipeline_segments(tokens: list[str]) -> list[list[str]]:
-    segments: list[list[str]] = [[]]
-    for token in tokens:
-        if token == "|":
-            segments.append([])
-            continue
-        segments[-1].append(token)
-    return segments
-
-
-def _is_items_from_parquet(stage: list[str]) -> bool:
-    return len(stage) >= 4 and stage[:3] == ["stacpkg", "items", "from-parquet"]
-
-
-def _is_items_to_parquet(stage: list[str]) -> bool:
-    return len(stage) == 4 and stage[:3] == ["stacpkg", "items", "to-parquet"]
-
-
-def _is_asset_lock_derive(stage: list[str]) -> bool:
-    return len(stage) >= 3 and stage[:3] == ["stacpkg", "asset-lock", "derive"]
-
-
-def _is_asset_lock_to_parquet(stage: list[str]) -> bool:
-    return len(stage) == 4 and stage[:3] == ["stacpkg", "asset-lock", "to-parquet"]
-
-
-def _is_build(stage: list[str]) -> bool:
-    return len(stage) >= 3 and stage[:2] == ["stacpkg", "build"]
+def _directive_command(value: str, prefix: str) -> str:
+    tokens = _command_tokens(value)
+    if not tokens:
+        raise UnsupportedCommand(f"{prefix} directive requires a command")
+    if not tokens[0].startswith(f"{prefix}-"):
+        tokens[0] = f"{prefix}-{tokens[0]}"
+    return shlex.join(tokens)
 
 
 def _option_value(tokens: list[str], option: str) -> str | None:
@@ -488,9 +458,30 @@ def _option_value(tokens: list[str], option: str) -> str | None:
 def _option_values(tokens: list[str], option: str) -> list[str]:
     values = []
     for index, token in enumerate(tokens):
+        prefix = f"{option}="
+        if token.startswith(prefix):
+            values.append(token.removeprefix(prefix))
+            continue
         if token == option and index + 1 < len(tokens):
             values.append(tokens[index + 1])
     return values
+
+
+def _without_option_values(tokens: list[str], option: str) -> list[str]:
+    result = []
+    skip_next = False
+    prefix = f"{option}="
+    for token in tokens:
+        if skip_next:
+            skip_next = False
+            continue
+        if token == option:
+            skip_next = True
+            continue
+        if token.startswith(prefix):
+            continue
+        result.append(token)
+    return result
 
 
 def _require_int(value: str, label: str) -> None:
@@ -500,14 +491,23 @@ def _require_int(value: str, label: str) -> None:
         raise UnsupportedCommand(f"{label} must be an integer: {value}") from error
 
 
+def _python_multiline_string(value: str) -> str:
+    if '"""' not in value:
+        return f'r"""\n{value}\n"""'
+    return repr(value)
+
+
 def _py_string(value: str) -> str:
     return json.dumps(value)
 
 
-def _arrow_name_for_parquet(path: str) -> str:
-    if path.endswith(".parquet"):
-        return path.removesuffix(".parquet") + ".arrow"
-    return f"{path}.arrow"
+def _py_value(value: str | int) -> str:
+    return str(value) if isinstance(value, int) else _py_string(value)
+
+
+def _py_tuple(values: list[str]) -> str:
+    suffix = "," if len(values) == 1 else ""
+    return "(" + ", ".join(_py_string(value) for value in values) + suffix + ")"
 
 
 def _title_from_slug(slug: str) -> str:

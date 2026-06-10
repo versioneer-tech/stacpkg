@@ -21,132 +21,145 @@ def _load_generator() -> object:
 
 GENERATOR = _load_generator()
 
+SMALL_FLOW = [
+    "# title: Small Flow",
+    "# test: test_small_flow",
+    "# test-setup: openaerialmap-items source.items.parquet --item-count 3",
+    "# ## Build package",
+    "stacpkg items from-parquet source.items.parquet \\",
+    "  | stacpkg build small.pkg/",
+    "# test-assert: package-items small.pkg 3",
+]
 
-def test_parse_usecase_shell_extracts_metadata_markdown_and_commands(tmp_path: Path) -> None:
-    source = tmp_path / "small-flow.sh"
-    source.write_text(
-        "\n".join(
-            [
-                "#!/usr/bin/env bash",
-                "set -euo pipefail",
-                "# title: Small Flow",
-                "# test: test_small_flow",
-                "",
-                "# ## Prepare data",
-                "setup-openaerialmap-items source.items.parquet --item-count 3",
-                "",
-                "# ## Build package",
-                "stacpkg items from-parquet source.items.parquet \\",
-                "  | stacpkg build small.pkg/",
-                "assert-package-items small.pkg 3",
-                "",
-            ]
-        ),
-        encoding="utf-8",
+
+def _source(root: Path, name: str, lines: list[str]) -> Path:
+    path = root / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join([*lines, ""]), encoding="utf-8")
+    return path
+
+
+def _parse(root: Path, lines: list[str], *, name: str = "small-flow.sh"):
+    return GENERATOR.parse_usecase_shell(_source(root, name, lines))
+
+
+def _event_types(usecase: object) -> list[str]:
+    return [type(event).__name__ for event in usecase.events]
+
+
+def _has_test_assertion(usecase: object) -> bool:
+    return any(
+        type(event).__name__ == "TestCommand" and event.text.startswith("assert-")
+        for event in usecase.events
     )
 
-    usecase = GENERATOR.parse_usecase_shell(source)
 
-    assert usecase.slug == "small-flow"
-    assert usecase.title == "Small Flow"
-    assert usecase.test_name == "test_small_flow"
-    assert usecase.generate_test
-    assert [type(event).__name__ for event in usecase.events] == [
+def test_parse_usecase_shell_extracts_metadata_markdown_and_commands(tmp_path: Path) -> None:
+    usecase = _parse(
+        tmp_path,
+        [
+            "#!/usr/bin/env bash",
+            "set -euo pipefail",
+            *SMALL_FLOW,
+        ],
+    )
+
+    assert (usecase.slug, usecase.title, usecase.test_name, usecase.generate_test) == (
+        "small-flow",
+        "Small Flow",
+        "test_small_flow",
+        True,
+    )
+    assert _event_types(usecase) == [
+        "TestCommand",
         "Markdown",
         "Command",
-        "Markdown",
-        "Command",
-        "Command",
+        "TestCommand",
     ]
 
 
-def test_markdown_from_usecase_renders_shell_source(tmp_path: Path) -> None:
-    source = tmp_path / "small-flow.sh"
-    source.write_text(
-        "\n".join(
+def test_markdown_from_usecase_renders_shell_source_without_test_directives(
+    tmp_path: Path,
+) -> None:
+    markdown = GENERATOR.markdown_from_usecase(
+        _parse(
+            tmp_path,
             [
                 "# title: Small Flow",
+                "# test: test_small_flow",
+                "# test-setup: openaerialmap-items source.items.parquet --item-count 3",
                 "# ## Build package",
+                "# Keep neighboring comment lines in the same Markdown block.",
+                "",
+                "# ## Run command",
                 "stacpkg items from-parquet source.items.parquet \\",
                 "  | stacpkg build small.pkg/",
-                "",
-            ]
-        ),
-        encoding="utf-8",
+                "# test-assert: package-items small.pkg 3",
+            ],
+        )
     )
-    usecase = GENERATOR.parse_usecase_shell(source)
-
-    markdown = GENERATOR.markdown_from_usecase(usecase)
 
     assert markdown.startswith("# Small Flow\n")
     assert "Generated from" in markdown
     assert "## Build package" in markdown
+    assert "## Build package\nKeep neighboring comment lines" in markdown
+    assert "## Build package\n\nKeep neighboring comment lines" not in markdown
+    assert "same Markdown block.\n\n## Run command" in markdown
     assert "```bash\nstacpkg items from-parquet source.items.parquet \\\n" in markdown
     assert "| stacpkg build small.pkg/" in markdown
+    assert "test-setup" not in markdown
+    assert "test-assert" not in markdown
+    assert "assert-package-items" not in markdown
 
 
-def test_python_test_from_usecase_maps_supported_cli_to_library_calls(tmp_path: Path) -> None:
-    source = tmp_path / "openaerialmap-provider-search-package.sh"
-    source.write_text(
-        "\n".join(
-            [
-                "# title: OpenAerialMap Provider Package with Asset Bytes",
-                "# test: test_openaerialmap_provider_package",
-                "setup-openaerialmap-items openaerialmap-2025.items.parquet --item-count 3",
-                "stacpkg items from-parquet openaerialmap-2025.items.parquet --providers ODM \\",
-                "  | stacpkg items to-parquet openaerialmap-provider.items.parquet",
-                "stacpkg items from-parquet openaerialmap-provider.items.parquet \\",
-                "  | stacpkg asset-lock derive --no-probe-metadata \\",
-                "  | stacpkg asset-lock to-parquet openaerialmap-provider.assets.lock.parquet",
-                "stacpkg items from-parquet openaerialmap-provider.items.parquet \\",
-                "  | stacpkg build openaerialmap-provider.pkg \\",
-                "  --asset-lock openaerialmap-provider.assets.lock.arrow \\",
-                "  --include-assets",
-                "assert-package-items openaerialmap-provider.pkg 1",
-                "",
-            ]
-        ),
-        encoding="utf-8",
+def test_python_test_from_usecase_runs_shell_commands_and_assertions(tmp_path: Path) -> None:
+    usecase = _parse(
+        tmp_path,
+        [
+            "# title: OpenAerialMap Provider Package with Asset Bytes",
+            "# test: test_openaerialmap_provider_package",
+            "# test-setup: openaerialmap-items openaerialmap-2025.items.parquet --item-count 3",
+            "stacpkg items from-parquet openaerialmap-2025.items.parquet --providers ODM \\",
+            "  | stacpkg items to-parquet openaerialmap-provider.items.parquet",
+            "stacpkg items from-parquet openaerialmap-provider.items.parquet \\",
+            "  | stacpkg asset-lock derive --no-probe-metadata \\",
+            "  | stacpkg asset-lock to-parquet openaerialmap-provider.assets.lock.parquet",
+            "stacpkg items from-parquet openaerialmap-provider.items.parquet \\",
+            "  | stacpkg build openaerialmap-provider.pkg \\",
+            "  --asset-lock <(stacpkg asset-lock from-parquet openaerialmap-provider.assets.lock.parquet) \\",
+            "  --include-assets",
+            "# test-assert: package-items openaerialmap-provider.pkg 1",
+            "# test-assert: asset-lock-store openaerialmap-provider.assets.lock.parquet file",
+        ],
+        name="openaerialmap-provider-search-package.sh",
     )
-    usecase = GENERATOR.parse_usecase_shell(source)
 
     python = GENERATOR.python_test_from_usecase(usecase)
 
-    assert "def test_openaerialmap_provider_package(tmp_path: Path) -> None:" in python
+    assert "def test_openaerialmap_provider_package(" in python
     assert "@pytest.mark.usecase" in python
-    assert "localized_openaerialmap_items(tmp_path, item_count=3)" in python
-    assert " = filter_items(" in python
-    assert 'providers={"ODM"}' in python
-    assert "write_items_geoparquet(" in python
-    assert "derive_asset_lock(" in python
-    assert "probe_metadata=False" in python
-    assert "build_package(" in python
-    assert '_p(tmp_path, "openaerialmap-provider.assets.lock.parquet")' in python
-    assert "asset_lock=asset_lock_" in python
-    assert "include_assets=True" in python
-    assert '_assert_parquet_rows(tmp_path, "openaerialmap-provider.pkg/items.parquet", 1)' in python
+    assert "shell = UsecaseShell(tmp_path)" in python
+    assert (
+        'setup_openaerialmap_items(tmp_path, "openaerialmap-2025.items.parquet", item_count=3)'
+        in python
+    )
+    assert "stacpkg items from-parquet openaerialmap-2025.items.parquet --providers ODM" in python
+    assert "stacpkg asset-lock derive --no-probe-metadata" in python
+    assert "stacpkg build openaerialmap-provider.pkg" in python
+    assert 'assert_package_items(tmp_path, "openaerialmap-provider.pkg", 1)' in python
+    assert (
+        'assert_asset_lock_store(tmp_path, "openaerialmap-provider.assets.lock.parquet", "file")'
+        in python
+    )
+    assert "filter_items(" not in python
+    assert "build_package(" not in python
 
 
 def test_generate_usecase_artifacts_writes_markdown_and_python_test(tmp_path: Path) -> None:
     source_dir = tmp_path / "docs" / "usecases"
     markdown_dir = tmp_path / "docs" / "generated" / "usecases"
     test_dir = tmp_path / "tests" / "usecases"
-    source_dir.mkdir(parents=True)
-    source = source_dir / "small-flow.sh"
-    source.write_text(
-        "\n".join(
-            [
-                "# title: Small Flow",
-                "# test: test_small_flow",
-                "setup-openaerialmap-items source.items.parquet --item-count 3",
-                "stacpkg items from-parquet source.items.parquet \\",
-                "  | stacpkg build small.pkg/",
-                "assert-package-items small.pkg 3",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
+    source = _source(source_dir, "small-flow.sh", SMALL_FLOW)
 
     artifacts = GENERATOR.generate_usecase_artifacts(
         source_dir=source_dir,
@@ -170,17 +183,14 @@ def test_check_mode_does_not_require_generated_files(tmp_path: Path) -> None:
     source_dir = tmp_path / "docs" / "usecases"
     markdown_dir = tmp_path / "docs" / "generated" / "usecases"
     test_dir = tmp_path / "tests" / "usecases"
-    source_dir.mkdir(parents=True)
-    source = source_dir / "small-flow.sh"
-    source.write_text(
-        "\n".join(
-            [
-                "# title: Small Flow",
-                "setup-openaerialmap-items source.items.parquet --item-count 3",
-                "",
-            ]
-        ),
-        encoding="utf-8",
+    _source(
+        source_dir,
+        "small-flow.sh",
+        [
+            "# title: Small Flow",
+            "# test-setup: openaerialmap-items source.items.parquet --item-count 3",
+            "# test-assert: file-exists source.items.parquet",
+        ],
     )
 
     artifacts = GENERATOR.generate_usecase_artifacts(
@@ -201,19 +211,15 @@ def test_docs_only_usecase_can_use_unsupported_cli_commands(tmp_path: Path) -> N
     source_dir = tmp_path / "docs" / "usecases"
     markdown_dir = tmp_path / "docs" / "generated" / "usecases"
     test_dir = tmp_path / "tests" / "usecases"
-    source_dir.mkdir(parents=True)
-    source = source_dir / "external-flow.sh"
-    source.write_text(
-        "\n".join(
-            [
-                "# title: External Flow",
-                "# test: none",
-                "# ## Fetch data",
-                "curl -fsS https://example.test/data.json --output data.json",
-                "",
-            ]
-        ),
-        encoding="utf-8",
+    source = _source(
+        source_dir,
+        "external-flow.sh",
+        [
+            "# title: External Flow",
+            "# test: none",
+            "# ## Fetch data",
+            "curl -fsS https://example.test/data.json --output data.json",
+        ],
     )
 
     usecase = GENERATOR.parse_usecase_shell(source)
@@ -231,22 +237,56 @@ def test_docs_only_usecase_can_use_unsupported_cli_commands(tmp_path: Path) -> N
     assert not (test_dir / "test_generated_external_flow.py").exists()
 
 
+def test_testable_usecase_requires_an_assertion(tmp_path: Path) -> None:
+    usecase = _parse(
+        tmp_path,
+        [
+            "# title: Missing Assertion",
+            "# test-setup: openaerialmap-items source.items.parquet --item-count 3",
+            "stacpkg items from-parquet source.items.parquet \\",
+            "  | stacpkg build small.pkg/",
+        ],
+        name="missing-assertion.sh",
+    )
+
+    with pytest.raises(GENERATOR.UnsupportedCommand, match="# test-assert"):
+        GENERATOR.python_test_from_usecase(usecase)
+
+
+def test_repository_usecase_sources_all_generate_python_tests() -> None:
+    source_dir = Path(__file__).parents[2] / "docs" / "usecases"
+    usecases = [GENERATOR.parse_usecase_shell(source) for source in sorted(source_dir.glob("*.sh"))]
+
+    assert {usecase.slug for usecase in usecases} == {
+        "asset-handover-to-recipient-storage",
+        "cdse-stac-to-geoparquet",
+        "hls2-vienna-s3-package",
+        "openaerialmap-package-handover-to-recipient-storage",
+        "openaerialmap-provider-search-package",
+        "openaerialmap-s3-alternate-package",
+        "reproducible-data-inputs",
+    }
+    assert [usecase.slug for usecase in usecases if not usecase.generate_test] == []
+    assert [usecase.slug for usecase in usecases if not _has_test_assertion(usecase)] == []
+
+    for usecase in usecases:
+        python = GENERATOR.python_test_from_usecase(usecase)
+        assert f"def {usecase.test_name}(" in python
+
+
 def test_generate_usecase_tests_removes_stale_generated_tests(tmp_path: Path) -> None:
     source_dir = tmp_path / "docs" / "usecases"
     test_dir = tmp_path / "tests" / "usecases"
-    source_dir.mkdir(parents=True)
     test_dir.mkdir(parents=True)
     (test_dir / "test_generated_stale.py").write_text("# stale\n", encoding="utf-8")
-    source = source_dir / "small-flow.sh"
-    source.write_text(
-        "\n".join(
-            [
-                "# title: Small Flow",
-                "setup-openaerialmap-items source.items.parquet --item-count 3",
-                "",
-            ]
-        ),
-        encoding="utf-8",
+    _source(
+        source_dir,
+        "small-flow.sh",
+        [
+            "# title: Small Flow",
+            "# test-setup: openaerialmap-items source.items.parquet --item-count 3",
+            "# test-assert: file-exists source.items.parquet",
+        ],
     )
 
     tests = GENERATOR.generate_usecase_tests(source_dir=source_dir, test_dir=test_dir)
@@ -256,10 +296,16 @@ def test_generate_usecase_tests_removes_stale_generated_tests(tmp_path: Path) ->
     assert not (test_dir / "test_generated_stale.py").exists()
 
 
-def test_unsupported_commands_fail_loudly(tmp_path: Path) -> None:
-    source = tmp_path / "unsupported.sh"
-    source.write_text("curl -fsS https://example.test/data.json\n", encoding="utf-8")
-    usecase = GENERATOR.parse_usecase_shell(source)
+def test_unsupported_test_directives_fail_loudly(tmp_path: Path) -> None:
+    usecase = _parse(
+        tmp_path,
+        [
+            "# title: Unsupported",
+            "stacpkg inspect package/",
+            "# test-assert: unsupported-check package/",
+        ],
+        name="unsupported.sh",
+    )
 
-    with pytest.raises(GENERATOR.UnsupportedCommand):
+    with pytest.raises(GENERATOR.UnsupportedCommand, match="unsupported test directive"):
         GENERATOR.python_test_from_usecase(usecase)
