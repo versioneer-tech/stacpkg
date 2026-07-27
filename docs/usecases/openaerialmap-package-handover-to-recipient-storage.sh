@@ -3,7 +3,7 @@ set -euo pipefail
 
 # title: OpenAerialMap Package Handover to Recipient Storage
 
-# Prerequisite: ensure two local S3 stores are running at `http://127.0.0.1:19000` and `http://127.0.0.1:19010`, and the local OCI registry is running at `localhost:15000`.
+# Prerequisite: ensure two local S3 stores are running at `http://127.0.0.1:19000` and `http://127.0.0.1:19010`, the Basic-auth OCI registry is running at `localhost:15000`, and its test credentials are available through `ORAS_USER` and `ORAS_PASS`.
 
 # ## Package a provider-filtered OpenAerialMap item selection
 # test-setup: openaerialmap-provider-items openaerialmap-provider.items.parquet --item-count 3
@@ -70,9 +70,9 @@ stacpkg items from-parquet recipient.items.parquet \
 # test-assert: package-file 03-recipient-package README.md
 
 # ## Publish and pull the recipient package through OCI
-stacpkg push 03-recipient-package/ localhost:15000/stacpkg/openaerialmap-recipient-package:v1 --plain-http --insecure
+stacpkg push 03-recipient-package/ localhost:15000/stacpkg/openaerialmap-recipient-package:v1 --auth-backend basic --plain-http
 
-stacpkg pull localhost:15000/stacpkg/openaerialmap-recipient-package:v1 --output-dir 04-pulled-recipient-package/ --plain-http --insecure
+stacpkg pull localhost:15000/stacpkg/openaerialmap-recipient-package:v1 --output-dir 04-pulled-recipient-package/ --auth-backend basic --plain-http
 # test-assert: package-items 04-pulled-recipient-package 1
 # test-assert: package-assets 04-pulled-recipient-package 1
 # test-assert: package-file 04-pulled-recipient-package README.md

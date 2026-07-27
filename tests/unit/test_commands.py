@@ -17,6 +17,7 @@ from typing import Any
 
 from stacpkg.arrow_io import read_parquet, read_stream, write_parquet, write_stream
 from stacpkg.assets import asset_lock_table, derive_asset_lock, plan_copy_assets
+from stacpkg import cli as cli_module
 from stacpkg.cli import build_parser
 from stacpkg.dataset import build_package
 from stacpkg.enrich import ALTERNATE_ASSETS_EXTENSION, FILE_EXTENSION, enrich_items
@@ -455,6 +456,88 @@ def test_probe_metadata_defaults_to_true() -> None:
 
     assert derive_args.probe_metadata is True
     assert build_args.probe_metadata is True
+
+
+def test_push_and_pull_accept_auth_backend() -> None:
+    parser = build_parser()
+
+    default_push = parser.parse_args(["push", "package.pkg", "registry.local/package:v1"])
+    default_pull = parser.parse_args(
+        ["pull", "registry.local/package:v1", "--output-dir", "package.pkg"]
+    )
+    basic_push = parser.parse_args(
+        [
+            "push",
+            "package.pkg",
+            "registry.local/package:v1",
+            "--auth-backend",
+            "basic",
+        ]
+    )
+    basic_pull = parser.parse_args(
+        [
+            "pull",
+            "registry.local/package:v1",
+            "--output-dir",
+            "package.pkg",
+            "--auth-backend",
+            "basic",
+        ]
+    )
+
+    assert default_push.auth_backend == "token"
+    assert default_pull.auth_backend == "token"
+    assert basic_push.auth_backend == "basic"
+    assert basic_pull.auth_backend == "basic"
+
+
+def test_push_and_pull_handlers_pass_auth_backend(monkeypatch) -> None:
+    calls: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+
+    def fake_push_package(*args: object, **kwargs: object) -> None:
+        calls.append(("push", args, kwargs))
+
+    def fake_pull_package(*args: object, **kwargs: object) -> None:
+        calls.append(("pull", args, kwargs))
+
+    monkeypatch.setattr(cli_module, "push_package", fake_push_package)
+    monkeypatch.setattr(cli_module, "pull_package", fake_pull_package)
+    parser = build_parser()
+
+    push_args = parser.parse_args(
+        [
+            "push",
+            "package.pkg",
+            "registry.local/package:v1",
+            "--auth-backend",
+            "basic",
+        ]
+    )
+    pull_args = parser.parse_args(
+        [
+            "pull",
+            "registry.local/package:v1",
+            "--output-dir",
+            "pulled.pkg",
+            "--auth-backend",
+            "basic",
+        ]
+    )
+
+    assert push_args.func(push_args) == 0
+    assert pull_args.func(pull_args) == 0
+    assert calls == [
+        (
+            "push",
+            (Path("package.pkg"), "registry.local/package:v1"),
+            {"plain_http": False, "insecure": False, "auth_backend": "basic"},
+        ),
+        (
+            "pull",
+            ("registry.local/package:v1", Path("pulled.pkg")),
+            {"plain_http": False, "insecure": False, "auth_backend": "basic"},
+        ),
+    ]
 
 
 def test_asset_lock_derive_accepts_probe_metadata_options() -> None:
@@ -1219,17 +1302,32 @@ def test_push_and_pull_command_flow_uses_typed_oci_layers(tmp_path: Path, monkey
     blobs: dict[str, bytes] = {}
 
     class FakeOrasClient:
-        def __init__(self, *, insecure: bool = False, tls_verify: bool = True):
-            self.auth = SimpleNamespace(load_configs=lambda _container: None)
+        def __init__(
+            self,
+            *,
+            insecure: bool = False,
+            tls_verify: bool = True,
+            auth_backend: str = "token",
+        ):
+            self.auth = SimpleNamespace(
+                load_configs=lambda container: calls.append(
+                    {
+                        "method": "load_configs",
+                        "container": container,
+                    }
+                )
+            )
             calls.append(
                 {
                     "method": "__init__",
                     "insecure": insecure,
                     "tls_verify": tls_verify,
+                    "auth_backend": auth_backend,
                 }
             )
 
         def get_container(self, target: str) -> str:
+            calls.append({"method": "get_container", "target": target})
             return target
 
         def upload_blob(
@@ -1286,7 +1384,13 @@ def test_push_and_pull_command_flow_uses_typed_oci_layers(tmp_path: Path, monkey
             Path(outfile).write_bytes(blobs[digest])
             return outfile
 
-    build_package(source, package, includes=[readme, docs], include_assets=True)
+    build_package(
+        source,
+        package,
+        includes=[readme, docs],
+        include_assets=True,
+        probe_metadata=False,
+    )
     monkeypatch.setattr("stacpkg.oci.OrasClient", FakeOrasClient)
 
     # CLI: stacpkg push stacpkg.pkg registry.local/stacpkg/openaerialmap-preview:v1
@@ -1294,7 +1398,39 @@ def test_push_and_pull_command_flow_uses_typed_oci_layers(tmp_path: Path, monkey
     # CLI: stacpkg pull registry.local/stacpkg/openaerialmap-preview:v1 --output-dir pulled.pkg
     pull_package("registry.local/stacpkg/openaerialmap-preview:v1", pulled)
 
-    assert calls[0] == {"method": "__init__", "insecure": False, "tls_verify": True}
+    default_clients = [call for call in calls if call["method"] == "__init__"]
+    assert default_clients == [
+        {
+            "method": "__init__",
+            "insecure": False,
+            "tls_verify": True,
+            "auth_backend": "token",
+        },
+        {
+            "method": "__init__",
+            "insecure": False,
+            "tls_verify": True,
+            "auth_backend": "token",
+        },
+    ]
+    load_configs = [call for call in calls if call["method"] == "load_configs"]
+    assert load_configs == [
+        {
+            "method": "load_configs",
+            "container": "registry.local/stacpkg/openaerialmap-preview:v1",
+        },
+        {
+            "method": "load_configs",
+            "container": "registry.local/stacpkg/openaerialmap-preview:v1",
+        },
+    ]
+    pull_load_index = max(
+        index for index, call in enumerate(calls) if call["method"] == "load_configs"
+    )
+    get_manifest_index = next(
+        index for index, call in enumerate(calls) if call["method"] == "get_manifest"
+    )
+    assert pull_load_index < get_manifest_index
     upload = next(call for call in calls if call["method"] == "upload_manifest")
     assert upload["target"] == "registry.local/stacpkg/openaerialmap-preview:v1"
     assert manifest["schemaVersion"] == 2
@@ -1314,7 +1450,6 @@ def test_push_and_pull_command_flow_uses_typed_oci_layers(tmp_path: Path, monkey
     assert ASSET_MEDIA_TYPE in upload["media_types"]
     assert "README.md" in upload["titles"]
     assert "docs" in upload["titles"]
-    assert {"method": "__init__", "insecure": False, "tls_verify": True} in calls[1:]
     get_manifest = next(call for call in calls if call["method"] == "get_manifest")
     assert get_manifest["target"] == "registry.local/stacpkg/openaerialmap-preview:v1"
     assert not (pulled / "manifest.json").exists()
@@ -1337,4 +1472,65 @@ def test_push_and_pull_command_flow_uses_typed_oci_layers(tmp_path: Path, monkey
         plain_http=True,
         insecure=True,
     )
-    assert calls[0] == {"method": "__init__", "insecure": True, "tls_verify": False}
+    assert calls[0] == {
+        "method": "__init__",
+        "insecure": True,
+        "tls_verify": False,
+        "auth_backend": "token",
+    }
+    plain_http_pulled = tmp_path / "plain-http-pulled.pkg"
+    pull_package(
+        "registry.local/stacpkg/openaerialmap-preview:plain-http",
+        plain_http_pulled,
+        plain_http=True,
+        insecure=True,
+    )
+    plain_http_clients = [call for call in calls if call["method"] == "__init__"]
+    assert plain_http_clients == [
+        {
+            "method": "__init__",
+            "insecure": True,
+            "tls_verify": False,
+            "auth_backend": "token",
+        },
+        {
+            "method": "__init__",
+            "insecure": True,
+            "tls_verify": False,
+            "auth_backend": "token",
+        },
+    ]
+
+    calls.clear()
+    basic_pulled = tmp_path / "basic-pulled.pkg"
+    push_package(
+        package,
+        "registry.local/stacpkg/openaerialmap-preview:basic",
+        auth_backend="basic",
+    )
+    pull_package(
+        "registry.local/stacpkg/openaerialmap-preview:basic",
+        basic_pulled,
+        auth_backend="basic",
+    )
+    basic_clients = [call for call in calls if call["method"] == "__init__"]
+    assert basic_clients == [
+        {
+            "method": "__init__",
+            "insecure": False,
+            "tls_verify": True,
+            "auth_backend": "basic",
+        },
+        {
+            "method": "__init__",
+            "insecure": False,
+            "tls_verify": True,
+            "auth_backend": "basic",
+        },
+    ]
+    assert read_parquet(basic_pulled / "items.parquet").equals(
+        read_parquet(package / "items.parquet")
+    )
+    assert read_parquet(basic_pulled / "assets.lock.parquet").equals(
+        read_parquet(package / "assets.lock.parquet")
+    )

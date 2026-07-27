@@ -439,6 +439,7 @@ def _push(args: argparse.Namespace) -> int:
         args.target,
         plain_http=args.plain_http,
         insecure=args.insecure,
+        auth_backend=args.auth_backend,
     )
     return 0
 
@@ -449,6 +450,7 @@ def _pull(args: argparse.Namespace) -> int:
         args.output_dir,
         plain_http=args.plain_http,
         insecure=args.insecure,
+        auth_backend=args.auth_backend,
     )
     return 0
 
@@ -923,6 +925,11 @@ def _add_package_commands(subcommands: argparse._SubParsersAction) -> None:
     )
     push.add_argument("package", type=Path, help="package directory to push")
     push.add_argument("target", help="OCI registry target reference")
+    push.add_argument(
+        "--auth-backend",
+        default="token",
+        help="oras-py authentication backend",
+    )
     push.add_argument("--plain-http", action="store_true", help="use plain HTTP for the registry")
     push.add_argument("--insecure", action="store_true", help="disable TLS certificate checks")
     push.set_defaults(func=_push)
@@ -935,6 +942,11 @@ def _add_package_commands(subcommands: argparse._SubParsersAction) -> None:
     )
     pull.add_argument("source", help="OCI registry source reference")
     pull.add_argument("--output-dir", required=True, type=Path, help="package directory to write")
+    pull.add_argument(
+        "--auth-backend",
+        default="token",
+        help="oras-py authentication backend",
+    )
     pull.add_argument("--plain-http", action="store_true", help="use plain HTTP for the registry")
     pull.add_argument("--insecure", action="store_true", help="disable TLS certificate checks")
     pull.set_defaults(func=_pull)

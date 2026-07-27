@@ -40,8 +40,13 @@ def _oras_client(
     *,
     plain_http: bool = False,
     insecure: bool = False,
+    auth_backend: str = "token",
 ) -> OrasClient:
-    return OrasClient(insecure=plain_http, tls_verify=not insecure)
+    return OrasClient(
+        insecure=plain_http,
+        tls_verify=not insecure,
+        auth_backend=auth_backend,
+    )
 
 
 def _media_type(path: Path) -> str:
@@ -168,6 +173,7 @@ def push_package(
     *,
     plain_http: bool = False,
     insecure: bool = False,
+    auth_backend: str = "token",
 ) -> None:
     with tempfile.TemporaryDirectory(prefix="stacpkg-oci-push-") as temp:
         temp_dir = Path(temp)
@@ -175,7 +181,11 @@ def push_package(
         config_path = temp_dir / CONFIG_NAME
         config_path.write_text("{}", encoding="utf-8")
 
-        client = _oras_client(plain_http=plain_http, insecure=insecure)
+        client = _oras_client(
+            plain_http=plain_http,
+            insecure=insecure,
+            auth_backend=auth_backend,
+        )
         container = client.get_container(target)
         client.auth.load_configs(container)
 
@@ -207,13 +217,20 @@ def pull_package(
     *,
     plain_http: bool = False,
     insecure: bool = False,
+    auth_backend: str = "token",
 ) -> None:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="stacpkg-oci-pull-") as temp:
         temp_dir = Path(temp)
-        client = _oras_client(plain_http=plain_http, insecure=insecure)
-        manifest = client.get_manifest(source)
+        client = _oras_client(
+            plain_http=plain_http,
+            insecure=insecure,
+            auth_backend=auth_backend,
+        )
+        container = client.get_container(source)
+        client.auth.load_configs(container)
+        manifest = client.get_manifest(container)
 
         for index, layer in enumerate(manifest.get("layers", [])):
             media_type = layer.get("mediaType")
@@ -225,7 +242,7 @@ def pull_package(
                 target_path = output_dir / ASSET_LOCK_PACKAGE_PATH
             elif media_type in {FILES_ZIP_MEDIA_TYPE, ASSET_ZIP_MEDIA_TYPE}:
                 archive_path = temp_dir / f"layer-{index}.zip"
-                client.download_blob(source, layer["digest"], str(archive_path))
+                client.download_blob(container, layer["digest"], str(archive_path))
                 _extract_zip(archive_path, output_dir)
                 continue
             elif media_type == ASSET_MEDIA_TYPE or title:
@@ -236,7 +253,7 @@ def pull_package(
                 raise RuntimeError(f"unsupported OCI package layer media type: {media_type}")
 
             target_path.parent.mkdir(parents=True, exist_ok=True)
-            client.download_blob(source, layer["digest"], str(target_path))
+            client.download_blob(container, layer["digest"], str(target_path))
 
     if not (output_dir / ITEMS_PACKAGE_PATH).exists():
         raise RuntimeError(f"OCI artifact did not contain {ITEMS_PACKAGE_PATH}")

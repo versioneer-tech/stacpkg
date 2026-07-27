@@ -19,6 +19,8 @@ s3store1_secret_access_key="${STACPKG_E2E_S3STORE1_SECRET_ACCESS_KEY:-${STACPKG_
 s3store2_access_key_id="${STACPKG_E2E_S3STORE2_ACCESS_KEY_ID:-${STACPKG_E2E_S3STORE2_ROOT_USER:-minioadmin2}}"
 s3store2_secret_access_key="${STACPKG_E2E_S3STORE2_SECRET_ACCESS_KEY:-${STACPKG_E2E_S3STORE2_ROOT_PASSWORD:-minioadmin456}}"
 registry_port="${STACPKG_E2E_REGISTRY_PORT:-15000}"
+registry_user="${STACPKG_E2E_REGISTRY_USER:-stacpkg-e2e}"
+registry_password="${STACPKG_E2E_REGISTRY_PASSWORD:-$(openssl rand -hex 24)}"
 pytest_mark="${STACPKG_E2E_PYTEST_MARK:-e2e and not performance}"
 pytest_log_level="${STACPKG_E2E_LOG_LEVEL:-INFO}"
 render_docs="${STACPKG_E2E_RENDER_DOCS:-0}"
@@ -30,8 +32,6 @@ fi
 log "configuration: cluster=${cluster} namespace=${namespace}"
 log "configuration: s3store1_api_port=${s3store1_api_port} s3store1_console_port=${s3store1_console_port}"
 log "configuration: s3store2_api_port=${s3store2_api_port} s3store2_console_port=${s3store2_console_port}"
-log "configuration: s3store1_access_key_id=${s3store1_access_key_id}"
-log "configuration: s3store2_access_key_id=${s3store2_access_key_id}"
 log "configuration: registry_port=${registry_port}"
 log "configuration: pytest_mark=${pytest_mark} pytest_log_level=${pytest_log_level}"
 log "configuration: pytest_targets=${pytest_targets[*]}"
@@ -77,12 +77,26 @@ kubectl -n "$namespace" create secret generic s3-store2-root \
   -o yaml \
   | kubectl apply -f -
 
+if ! command -v htpasswd >/dev/null 2>&1; then
+  log "htpasswd is required to configure the Basic-auth OCI registry"
+  exit 1
+fi
+registry_htpasswd="$(printf '%s\n' "$registry_password" | htpasswd -niB "$registry_user")"
+log "applying OCI registry Basic-auth configuration"
+kubectl -n "$namespace" create secret generic registry-basic-auth \
+  --from-literal=htpasswd="$registry_htpasswd" \
+  --dry-run=client \
+  -o yaml \
+  | kubectl apply -f -
+
 log "applying S3 store Kubernetes manifest"
 kubectl apply -f tests/setup/s3-stores.yaml
 log "restarting S3 store deployments to use current credentials"
 kubectl -n "$namespace" rollout restart deployment/s3store1 deployment/s3store2
 log "applying local registry Kubernetes manifest"
 kubectl apply -f tests/setup/registry.yaml
+log "restarting registry deployment to use current Basic-auth configuration"
+kubectl -n "$namespace" rollout restart deployment/registry
 log "waiting for S3 store 1 deployment rollout"
 kubectl -n "$namespace" rollout status deployment/s3store1 --timeout=180s
 log "waiting for S3 store 2 deployment rollout"
@@ -148,14 +162,19 @@ done
 registry_url="http://127.0.0.1:${registry_port}/v2/"
 log "waiting for registry endpoint: ${registry_url}"
 for _ in {1..40}; do
-  if curl -fsS "$registry_url" >/dev/null 2>&1; then
+  registry_status="$(curl -sS -o /dev/null -w '%{http_code}' "$registry_url" || true)"
+  if [[ "$registry_status" == "401" ]]; then
     log "registry endpoint is ready: ${registry_url}"
     break
   fi
   sleep 1
 done
 log "verifying registry endpoint: ${registry_url}"
-curl -fsS "$registry_url" >/dev/null
+registry_status="$(curl -sS -o /dev/null -w '%{http_code}' "$registry_url" || true)"
+if [[ "$registry_status" != "401" ]]; then
+  log "expected Basic-auth registry challenge, got HTTP ${registry_status}"
+  exit 1
+fi
 
 export STACPKG_E2E_S3STORE1_ENDPOINT="http://127.0.0.1:${s3store1_api_port}"
 export STACPKG_E2E_S3STORE2_ENDPOINT="http://127.0.0.1:${s3store2_api_port}"
@@ -167,20 +186,16 @@ export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-${s3store1_access_key_id}}"
 export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-${s3store1_secret_access_key}}"
 export STACPKG_E2E_REGISTRY="127.0.0.1:${registry_port}"
 export STACPKG_TEST_S3STORE_ENDPOINT="${STACPKG_TEST_S3STORE_ENDPOINT:-${STACPKG_E2E_S3STORE1_ENDPOINT}}"
+export ORAS_USER="$registry_user"
+export ORAS_PASS="$registry_password"
 
 cat <<EOF
 E2E endpoints:
   S3 store 1 API:     ${STACPKG_E2E_S3STORE1_ENDPOINT}
   S3 store 1 console: http://127.0.0.1:${s3store1_console_port}
-  S3 store 1 access:  ${STACPKG_S3_ACCESS_KEY_ID_STACPKG_E2E_S3STORE1}
-  S3 store 1 secret:  ${STACPKG_S3_SECRET_ACCESS_KEY_STACPKG_E2E_S3STORE1}
   S3 store 2 API:     ${STACPKG_E2E_S3STORE2_ENDPOINT}
   S3 store 2 console: http://127.0.0.1:${s3store2_console_port}
-  S3 store 2 access:  ${STACPKG_S3_ACCESS_KEY_ID_STACPKG_E2E_S3STORE2}
-  S3 store 2 secret:  ${STACPKG_S3_SECRET_ACCESS_KEY_STACPKG_E2E_S3STORE2}
-  OCI registry:    http://${STACPKG_E2E_REGISTRY}
-  AWS fallback access: ${AWS_ACCESS_KEY_ID}
-  AWS fallback secret: ${AWS_SECRET_ACCESS_KEY}
+  OCI registry:       http://${STACPKG_E2E_REGISTRY} (Basic auth)
 EOF
 
 log "running pytest e2e suite"

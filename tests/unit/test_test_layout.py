@@ -39,7 +39,8 @@ def test_e2e_tests_are_flattened_and_named_by_kind() -> None:
 
     e2e_tests = {path.name for path in (TESTS_ROOT / "e2e").glob("test_*.py")}
     assert any(name.startswith("test_performance_") for name in e2e_tests)
-    assert all(name.startswith("test_performance_") for name in e2e_tests)
+    assert any(name.startswith("test_oci_") for name in e2e_tests)
+    assert all(name.startswith(("test_performance_", "test_oci_")) for name in e2e_tests)
 
 
 def test_docs_usecase_tests_live_under_usecases() -> None:

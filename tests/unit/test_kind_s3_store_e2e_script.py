@@ -18,6 +18,14 @@ def test_kind_s3_store_runner_uses_distinct_minio_credentials() -> None:
     assert old_registry_path not in script
     assert "s3-store1-root" in script
     assert "s3-store2-root" in script
+    assert "registry-basic-auth" in script
+    assert "ORAS_USER" in script
+    assert "ORAS_PASS" in script
+    assert "htpasswd -niB" in script
+    assert 'registry_status" == "401"' in script
+    assert "S3 store 1 secret:" not in script
+    assert "S3 store 2 secret:" not in script
+    assert "AWS fallback secret:" not in script
     assert "name: s3-store-root" not in script
     assert "minioadmin1" in script
     assert "minioadmin2" in script

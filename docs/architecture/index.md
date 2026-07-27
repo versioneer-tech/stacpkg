@@ -109,3 +109,4 @@ The ADRs record the durable design choices behind the current package:
 | [ADR-003](0003-asset-lock-row-structure.md) | Asset-lock rows use structured storage fields instead of one stored `href`. |
 | [ADR-004](0004-asset-lock-checksum-facts-and-stac-projection.md) | Draft checksum support keeps checksum facts in the asset lock first. |
 | [ADR-005](0005-asset-lock-driven-stac-projection.md) | STAC asset hrefs and alternates are projected from matching asset-lock rows. |
+| [ADR-006](0006-oci-authentication-backend-selection.md) | OCI push and pull expose oras-py authentication backend selection. |

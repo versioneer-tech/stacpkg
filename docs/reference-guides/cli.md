@@ -143,17 +143,36 @@ stacpkg inspect stacpkg.pkg/ --format markdown > inspect.md
 | --- | --- | --- | --- |
 | `PACKAGE` | Yes | - | Package directory to push. |
 | `TARGET` | Yes | - | OCI registry target reference. |
+| `--auth-backend BACKEND` | No | `token` | oras-py authentication backend. |
 | `--plain-http` | No | `false` | Use plain HTTP for the registry. |
 | `--insecure` | No | `false` | Disable TLS certificate checks. |
 
 Push a package directory as an OCI artifact with typed layers for the required
-tables, optional file ZIPs, and materialized asset bytes.
+tables, optional file ZIPs, and materialized asset bytes. The default
+authentication backend is `token`, which preserves the existing bearer-token
+flow.
 
 ```bash
 stacpkg push stacpkg.pkg/ ghcr.io/example/stacpkg/openaerialmap-austria:v1
 ```
 
-For a local HTTP registry, use `--plain-http --insecure`.
+Use `--auth-backend basic` for a registry that accepts HTTP Basic
+authentication without issuing bearer tokens. oras-py reads credentials from
+its supported runtime configuration, including `ORAS_USER`, `ORAS_PASS`, and
+Docker authentication configuration. Do not put credentials in package files
+or command arguments.
+
+```bash
+export ORAS_USER="example-user"
+export ORAS_PASS="<registry-password>"
+stacpkg push stacpkg.pkg/ registry.example/stacpkg/example:v1 \
+  --auth-backend basic
+```
+
+Basic authentication should normally be used over HTTPS. `--plain-http` only
+changes HTTPS to HTTP, and `--insecure` only disables TLS certificate
+verification. Neither option is required merely because Basic authentication
+is selected. For a local HTTP registry, add `--plain-http`.
 
 ---
 
@@ -165,17 +184,39 @@ For a local HTTP registry, use `--plain-http --insecure`.
 | --- | --- | --- | --- |
 | `SOURCE` | Yes | - | OCI registry source reference. |
 | `--output-dir PATH` | Yes | - | Package directory to write. |
+| `--auth-backend BACKEND` | No | `token` | oras-py authentication backend. |
 | `--plain-http` | No | `false` | Use plain HTTP for the registry. |
 | `--insecure` | No | `false` | Disable TLS certificate checks. |
 
 Pull a package artifact from an OCI registry and reconstruct the package
-directory from its typed layers.
+directory from its typed layers. The default authentication backend is `token`.
 
 ```bash
 stacpkg pull ghcr.io/example/stacpkg/openaerialmap-austria:v1 --output-dir stacpkg.pkg/
 ```
 
-For a local HTTP registry, use `--plain-http --insecure`.
+Pull from a Basic-auth registry with the same oras-py runtime credentials:
+
+```bash
+export ORAS_USER="example-user"
+export ORAS_PASS="<registry-password>"
+stacpkg pull registry.example/stacpkg/example:v1 \
+  --output-dir stacpkg.pkg/ \
+  --auth-backend basic
+```
+
+Basic authentication does not imply plain HTTP or disabled certificate
+verification. Use `--plain-http` only for an HTTP registry and `--insecure`
+only when TLS certificate verification must be disabled.
+
+The Python API exposes the same backend selection:
+
+```python
+from stacpkg.oci import pull_package, push_package
+
+push_package(package, target, auth_backend="basic")
+pull_package(source, output, auth_backend="basic")
+```
 
 ## Item Commands
 

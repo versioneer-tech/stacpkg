@@ -31,24 +31,35 @@ items:
               ports:
                 - name: registry
                   containerPort: 5000
+              env:
+                - name: REGISTRY_AUTH
+                  value: htpasswd
+                - name: REGISTRY_AUTH_HTPASSWD_REALM
+                  value: stacpkg e2e registry
+                - name: REGISTRY_AUTH_HTPASSWD_PATH
+                  value: /auth/htpasswd
               readinessProbe:
-                httpGet:
-                  path: /v2/
+                tcpSocket:
                   port: registry
                 initialDelaySeconds: 3
                 periodSeconds: 5
               livenessProbe:
-                httpGet:
-                  path: /v2/
+                tcpSocket:
                   port: registry
                 initialDelaySeconds: 10
                 periodSeconds: 10
               volumeMounts:
                 - name: registry-data
                   mountPath: /var/lib/registry
+                - name: registry-auth
+                  mountPath: /auth
+                  readOnly: true
           volumes:
             - name: registry-data
               emptyDir: {}
+            - name: registry-auth
+              secret:
+                secretName: registry-basic-auth
   - apiVersion: v1
     kind: Service
     metadata:

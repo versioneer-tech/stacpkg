@@ -24,6 +24,7 @@ nav:
     - ADR-003 Asset Lock Row Structure: architecture/0003-asset-lock-row-structure.md
     - ADR-004 Asset-Lock Checksum Facts and STAC Projection: architecture/0004-asset-lock-checksum-facts-and-stac-projection.md
     - ADR-005 Asset-Lock Driven STAC Projection: architecture/0005-asset-lock-driven-stac-projection.md
+    - ADR-006 Expose OCI Authentication Backend Selection: architecture/0006-oci-authentication-backend-selection.md
   - Reference:
     - CLI: reference-guides/cli.md
     - Items: reference-guides/items.md
