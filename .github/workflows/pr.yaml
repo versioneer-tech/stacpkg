@@ -1,9 +1,13 @@
 # Copyright 2026, Versioneer (https://versioneer.at)
 # SPDX-License-Identifier: Apache-2.0
 
-name: PR
+name: Tests
 
 on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
   pull_request:
     types:
       - opened
@@ -15,10 +19,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   static:
     name: Pre-commit and docs
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Clone the code
         uses: actions/checkout@v4
@@ -46,6 +55,7 @@ jobs:
   unit:
     name: Unit tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Clone the code
         uses: actions/checkout@v4
@@ -73,6 +83,7 @@ jobs:
   integration:
     name: Integration tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Clone the code
         uses: actions/checkout@v4
@@ -94,13 +105,37 @@ jobs:
       - name: Run integration tests
         run: make test-integration
 
+  distribution:
+    name: Installed distribution
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Check the installed wheel
+        run: make test-distribution
+
   e2e:
     name: End-to-end and performance tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs:
       - static
       - unit
       - integration
+      - distribution
     steps:
       - name: Clone the code
         uses: actions/checkout@v4
@@ -118,6 +153,9 @@ jobs:
 
       - name: Install project dependencies
         run: uv sync --all-groups --frozen
+
+      - name: Install registry authentication tool
+        run: sudo apt-get update && sudo apt-get install -y apache2-utils
 
       - name: Set up kind cluster
         uses: helm/kind-action@v1

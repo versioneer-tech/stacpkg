@@ -1,171 +1,129 @@
 # Copyright 2026, Versioneer (https://versioneer.at)
 # SPDX-License-Identifier: Apache-2.0
 
-from __future__ import annotations
-
 import json
-import os
+import copy
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from stacpkg.assets import derive_asset_lock
+from stacpkg.geoparquet import write_items_geoparquet
+from stacpkg.stac_json import read_stac_json
+from tests.unit.openaerialmap_fixture import write_localized_openaerialmap_item_collection_json
 from tests.data.openaerialmap_data import (
     OPENAERIALMAP,
-    OPENAERIALMAP_ITEM_COUNT,
     OPENAERIALMAP_SELECTION_IDS,
+    openaerialmap_items,
 )
 
-pytestmark = [
-    pytest.mark.integration,
-]
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
-INTEGRATION_TIMEOUT_SECONDS = int(os.environ.get("STACPKG_INTEGRATION_TIMEOUT", "120"))
+pytestmark = pytest.mark.integration
 
 
-def _require_executable(name: str) -> str:
-    path = shutil.which(name)
-    if path is None:
-        pytest.skip(f"{name!r} is required for integration tests")
-    return path
-
-
-def _subprocess_env() -> dict[str, str]:
-    env = os.environ.copy()
-    pythonpath = [str(REPO_ROOT / "src"), str(REPO_ROOT)]
-    if env.get("PYTHONPATH"):
-        pythonpath.append(env["PYTHONPATH"])
-    env["PYTHONPATH"] = os.pathsep.join(pythonpath)
-    return env
-
-
-def _pyarrow_table(value: object) -> pa.Table:
-    if value is None:
-        pytest.fail("rustac DuckdbClient.search_to_arrow returned no table")
-    if isinstance(value, pa.Table):
-        return value
-    if isinstance(value, pa.RecordBatchReader):
-        return value.read_all()
-
-    to_pyarrow = getattr(value, "to_pyarrow", None)
-    if callable(to_pyarrow):
-        converted = to_pyarrow()
-        if isinstance(converted, pa.Table):
-            return converted
-        value = converted
-
-    try:
-        return pa.table(value)
-    except (pa.ArrowException, TypeError, ValueError) as error:
-        pytest.fail(f"could not convert rustac Arrow result to pyarrow.Table: {error}")
-
-
-def _ipc_bytes(table: pa.Table) -> bytes:
-    sink = pa.BufferOutputStream()
-    with pa.ipc.new_stream(sink, table.schema) as writer:
-        writer.write_table(table)
-    return sink.getvalue().to_pybytes()
-
-
-def test_gpio_inspect_reads_local_geoparquet_fixture() -> None:
-    gpio = _require_executable("gpio")
-    expected_items = pq.ParquetFile(OPENAERIALMAP).metadata.num_rows
+def test_gpio_reads_stacpkg_output(tmp_path):
+    gpio = shutil.which("gpio")
+    assert gpio is not None, "install the integration dependency group"
+    source = tmp_path / "items.parquet"
+    items = openaerialmap_items()
+    write_items_geoparquet(items, source)
 
     result = subprocess.run(
-        [
-            gpio,
-            "inspect",
-            str(OPENAERIALMAP),
-            "--json",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=_subprocess_env(),
-        timeout=INTEGRATION_TIMEOUT_SECONDS,
-        check=False,
+        [gpio, "inspect", str(source), "--json"],
+        capture_output=True,
+        env={"PATH": str(Path(gpio).parent)},
+        timeout=120,
+        check=True,
     )
+    report = json.loads(result.stdout)
 
-    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
-    metadata = json.loads(result.stdout)
-    geometry_column = next(column for column in metadata["columns"] if column["name"] == "geometry")
-
-    assert metadata["rows"] == expected_items
-    assert metadata["geoparquet_version"] == "1.0.0"
-    assert geometry_column["is_geometry"] is True
+    assert report["rows"] == items.num_rows
+    geometry = next(column for column in report["columns"] if column["name"] == "geometry")
+    assert geometry["is_geometry"] is True
 
 
-def test_rustac_py_duckdb_search_to_arrow_uses_explicit_ipc_handoff() -> None:
-    """rustac-py exposes in-process Arrow tables, not CLI Arrow IPC stdout."""
-    duckdb = pytest.importorskip(
-        "duckdb",
-        reason="DuckDB Python package is required for integration tests",
-    )
-    rustac = pytest.importorskip(
-        "rustac",
-        reason="rustac-py is required for this integration interop check",
-    )
-    rustac_duckdb_extensions = pytest.importorskip(
-        "rustac_duckdb_extensions",
-        reason="bundled DuckDB extensions are required for rustac-py integration tests",
-    )
-    DuckdbClient = getattr(rustac, "DuckdbClient", None)
-    if DuckdbClient is None:
-        pytest.skip("rustac-py must be installed with the arrow extra for DuckdbClient")
+def test_rustac_selection_can_be_locked_and_queried_with_duckdb():
+    import duckdb
+    import rustac
+    import rustac_duckdb_extensions
 
+    selected = rustac.DuckdbClient(
+        extension_directory=rustac_duckdb_extensions.extension_directory(),
+        install_extensions=False,
+    ).search_to_arrow(str(OPENAERIALMAP), ids=list(OPENAERIALMAP_SELECTION_IDS))
+    items = pa.table(selected)
+    lock = derive_asset_lock(items, asset_keys={"thumbnail"}, probe_metadata=False)
+
+    connection = duckdb.connect()
     try:
-        rustac_table = DuckdbClient(
-            extension_directory=rustac_duckdb_extensions.extension_directory(),
-            install_extensions=False,
-        ).search_to_arrow(
-            str(OPENAERIALMAP),
-            ids=list(OPENAERIALMAP_SELECTION_IDS),
-        )
-    except Exception as error:
-        pytest.skip(f"rustac-py DuckdbClient.search_to_arrow is unavailable: {error}")
-
-    table = _pyarrow_table(rustac_table)
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "stacpkg",
-            "asset-lock",
-            "derive",
-            "--asset-keys",
-            "thumbnail",
-        ],
-        input=_ipc_bytes(table),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=_subprocess_env(),
-        timeout=INTEGRATION_TIMEOUT_SECONDS,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
-    with pa.ipc.open_stream(pa.BufferReader(result.stdout)) as reader:
-        asset_lock = reader.read_all()
-
-    connection = duckdb.connect(database=":memory:")
-    try:
-        connection.register("asset_lock", asset_lock)
+        connection.register("assets", lock)
         rows = connection.execute(
-            """
-            SELECT asset_key, count(*) AS row_count
-            FROM asset_lock
-            GROUP BY asset_key
-            ORDER BY asset_key
-            """
+            "SELECT item_id, asset_key FROM assets ORDER BY item_id"
         ).fetchall()
     finally:
         connection.close()
 
-    assert dict(rows) == {
-        "thumbnail": OPENAERIALMAP_ITEM_COUNT,
+    assert rows == [(item_id, "thumbnail") for item_id in sorted(OPENAERIALMAP_SELECTION_IDS)]
+
+
+def test_duckdb_reads_every_geometry_coordinate_after_json_to_parquet(tmp_path):
+    import duckdb
+    import rustac_duckdb_extensions
+
+    source = write_localized_openaerialmap_item_collection_json(
+        tmp_path, tmp_path / "selection.json"
+    )
+    original = json.loads(source.read_text())["features"][0]
+    point = [16, 48, 100]
+    line = [[16, 48, 100], [17, 49, 200]]
+    ring = [[16, 48, 100], [17, 48, 110], [17, 49, 120], [16, 48, 100]]
+    geometries = {
+        "Point": point,
+        "LineString": line,
+        "Polygon": [ring],
+        "MultiPoint": line,
+        "MultiLineString": [line, line[::-1]],
+        "MultiPolygon": [[ring], [ring[::-1]]],
     }
+
+    def coordinates_for_dimensions(coordinates, dimensions):
+        if isinstance(coordinates[0], list):
+            return [coordinates_for_dimensions(child, dimensions) for child in coordinates]
+        return coordinates[:dimensions]
+
+    items, expected = [], {}
+    for kind, coordinates in geometries.items():
+        for dimensions in (2, 3):
+            item = copy.deepcopy(original)
+            item["id"] = f"{original['id']}-{kind}-{dimensions}"
+            item["geometry"] = {
+                "type": kind,
+                "coordinates": coordinates_for_dimensions(coordinates, dimensions),
+            }
+            item["bbox"] = [16, 48, 17, 49] if dimensions == 2 else [16, 48, 100, 17, 49, 200]
+            items.append(item)
+            expected[item["id"]] = item["geometry"]
+    source.write_text(json.dumps({"type": "FeatureCollection", "features": items}))
+    output = tmp_path / "items.parquet"
+    write_items_geoparquet(read_stac_json(source), output)
+    saved = pq.read_table(output)
+    connection = duckdb.connect(
+        config={
+            "extension_directory": rustac_duckdb_extensions.extension_directory(),
+            "autoinstall_known_extensions": "false",
+            "autoload_known_extensions": "false",
+        }
+    )
+    try:
+        connection.execute("LOAD spatial")
+        connection.register("saved", pa.table({"id": saved["id"], "wkb": saved["geometry"]}))
+        rows = connection.execute(
+            "SELECT id, ST_AsGeoJSON(ST_GeomFromWKB(wkb)) FROM saved"
+        ).fetchall()
+    finally:
+        connection.close()
+
+    assert {item_id: json.loads(geometry) for item_id, geometry in rows} == expected

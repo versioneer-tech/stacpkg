@@ -9,6 +9,7 @@ build:
     python: "3.13"
   jobs:
     pre_build:
+      - python -m pytest tests/usecases -m usecase
       - python scripts/generate_usecase_tests.py --no-tests
 
 python:

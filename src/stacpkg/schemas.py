@@ -58,6 +58,7 @@ ASSET_LOCK_CORE_COLUMNS = (
 )
 ASSET_LOCK_FACT_COLUMNS = (
     "size_bytes",
+    "file_checksum",
     "etag",
     "last_modified",
 )
@@ -71,6 +72,7 @@ ASSET_LOCK_FIELDS = {
     "store_endpoint_url": pa.field("store_endpoint_url", pa.string()),
     "key": pa.field("key", pa.string()),
     "size_bytes": pa.field("size_bytes", pa.int64()),
+    "file_checksum": pa.field("file_checksum", pa.string()),
     "etag": pa.field("etag", pa.string()),
     "last_modified": pa.field("last_modified", pa.string()),
 }

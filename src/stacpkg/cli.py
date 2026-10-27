@@ -8,7 +8,7 @@ import json
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 import pyarrow as pa
 
@@ -30,8 +30,15 @@ from stacpkg.assets import (
     write_asset_lock_parquet_stream,
 )
 from stacpkg.dataset import build_package
+from stacpkg.checksums import CHECKSUM_STRATEGIES
+from stacpkg.sources import resolve_item_assets
+from stacpkg.workflows import relocate_package, validate_package
 from stacpkg.enrich import enrich_items
-from stacpkg.geoparquet import items_table_to_geoparquet_table, write_items_geoparquet_stream
+from stacpkg.geoparquet import (
+    extract_collections,
+    items_table_to_geoparquet_table,
+    write_items_geoparquet_stream,
+)
 from stacpkg.items import filter_items
 from stacpkg.oci import pull_package, push_package
 from stacpkg.object_store import (
@@ -86,6 +93,31 @@ def _read_stac_ndjson_input(path: Path | None) -> pa.Table:
         return read_stac_ndjson_document(sys.stdin)
     assert path is not None
     return read_stac_ndjson(path)
+
+
+def _read_collection_files(paths: list[Path] | None) -> list[dict[str, Any]] | None:
+    if not paths:
+        return None
+    collections: list[dict[str, Any]] = []
+    for path in paths:
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError(f"failed to read STAC Collection file {path}: {error}") from error
+        if isinstance(document, dict):
+            collections.append(document)
+        elif isinstance(document, list):
+            for index, collection in enumerate(document):
+                if not isinstance(collection, dict):
+                    raise ValueError(
+                        f"STAC Collection file {path} array entry {index} must be an object"
+                    )
+                collections.append(collection)
+        else:
+            raise ValueError(
+                f"STAC Collection file {path} must contain an object or an array of objects"
+            )
+    return collections
 
 
 def _write_items_output(table: pa.Table) -> None:
@@ -191,7 +223,7 @@ def _items_from_json(args: argparse.Namespace) -> int:
     transform = _item_filter_transform(args)
     if transform is not None:
         table = transform(table)
-    table = items_table_to_geoparquet_table(table)
+    table = items_table_to_geoparquet_table(resolve_item_assets(table))
     _write_items_output(table)
     return 0
 
@@ -200,7 +232,9 @@ def _items_from_ndjson(args: argparse.Namespace) -> int:
     transform = _item_filter_transform(args)
     isatty = getattr(sys.stdout, "isatty", None)
     if isatty is not None and isatty():
-        table = items_table_to_geoparquet_table(_read_stac_ndjson_input(args.input_file))
+        table = items_table_to_geoparquet_table(
+            resolve_item_assets(_read_stac_ndjson_input(args.input_file))
+        )
         if transform is not None:
             table = transform(table)
         _write_items_output(table)
@@ -228,16 +262,27 @@ def _items_from_ndjson(args: argparse.Namespace) -> int:
 
 
 def _items_from_parquet(args: argparse.Namespace) -> int:
+    transform = _item_filter_transform(args)
+
+    def prepare(table):
+        if transform is not None:
+            table = transform(table)
+        return resolve_item_assets(table, document_href=args.input_file.resolve())
+
     _write_parquet_stdout(
         args.input_file,
         batch_size=args.batch_size,
-        transform=_item_filter_transform(args),
+        transform=prepare,
     )
     return 0
 
 
 def _items_to_parquet(args: argparse.Namespace) -> int:
-    write_items_geoparquet_stream(sys.stdin.buffer, args.output_file)
+    write_items_geoparquet_stream(
+        sys.stdin.buffer,
+        args.output_file,
+        collections=_read_collection_files(args.collection_files),
+    )
     return 0
 
 
@@ -309,6 +354,9 @@ def _asset_lock_derive(args: argparse.Namespace) -> int:
         include_metadata_assets=args.include_metadata_assets,
         keep_going=args.keep_going,
         max_workers=args.max_workers,
+        checksum=args.checksum,
+        source_base=args.source_base,
+        source_alternate=args.source_alternate,
     )
     _write_asset_lock_output(asset_lock)
     return 0
@@ -349,6 +397,7 @@ def _asset_lock_validate(args: argparse.Namespace) -> int:
         asset_keys=_filter_set(args.asset_keys),
         keep_going=args.keep_going,
         max_workers=args.max_workers,
+        checksum=args.checksum,
     )
     text = "".join(f"{json.dumps(result, sort_keys=True, default=str)}\n" for result in results)
     _write_text_output(text)
@@ -390,6 +439,7 @@ def _asset_lock_relocate(args: argparse.Namespace) -> int:
         memory_limit_bytes=args.memory_limit_bytes,
         chunk_size_bytes=args.chunk_size_bytes,
         put_max_concurrency=args.put_max_concurrency,
+        checksum=args.checksum,
     )
     _write_asset_lock_output(copied)
     return 0
@@ -417,8 +467,53 @@ def _build(args: argparse.Namespace) -> int:
         include_metadata_assets=args.include_metadata_assets,
         item_ids=_filter_set(args.item_ids),
         providers=_filter_set(args.providers),
+        collections=_read_collection_files(args.collection_files),
+        checksum=args.checksum,
+        source_base=args.source_base,
+        source_alternate=args.source_alternate,
     )
     return 0
+
+
+def _relocate(args: argparse.Namespace) -> int:
+    result = relocate_package(
+        _read_items_stream(),
+        args.output_dir,
+        target=args.target,
+        source_base=args.source_base,
+        source_alternate=args.source_alternate,
+        target_endpoint_url=args.target_endpoint_url,
+        asset_keys=_filter_set(args.asset_keys),
+        include_metadata_assets=args.include_metadata_assets,
+        collections=_read_collection_files(args.collection_files),
+        overwrite=args.overwrite,
+        max_workers=args.max_workers,
+        memory_limit_bytes=args.memory_limit_bytes,
+        chunk_size_bytes=args.chunk_size_bytes,
+        put_max_concurrency=args.put_max_concurrency,
+    )
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
+def _validate(args: argparse.Namespace) -> int:
+    valid = False
+    try:
+        for result in validate_package(
+            args.package, checksum=args.checksum, max_workers=args.max_workers
+        ):
+            print(json.dumps(result, sort_keys=True, default=str), flush=True)
+            if result["type"] == "summary":
+                valid = result["valid"]
+    except (ValueError, OSError, pa.ArrowException) as error:
+        print(
+            json.dumps(
+                {"type": "summary", "valid": False, "lock_written": False, "error": str(error)},
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+    return 0 if valid else 1
 
 
 def _inspect(args: argparse.Namespace) -> int:
@@ -430,6 +525,20 @@ def _inspect(args: argparse.Namespace) -> int:
     else:
         text = package_inspect_yaml(args.package)
     _write_text_output(text)
+    return 0
+
+
+def _collections_extract(args: argparse.Namespace) -> int:
+    text = json.dumps(
+        extract_collections(args.input_file),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    text = f"{text}\n"
+    if args.output is None:
+        _write_text_output(text)
+    else:
+        args.output.write_text(text, encoding="utf-8")
     return 0
 
 
@@ -493,6 +602,31 @@ def _add_item_filter_arguments(command: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_collection_file_arguments(command: argparse.ArgumentParser) -> None:
+    command.add_argument(
+        "--collection",
+        dest="collection_files",
+        action="append",
+        type=Path,
+        metavar="PATH",
+        help="STAC Collection JSON path; repeat for multiple files",
+    )
+
+
+def _add_checksum_arguments(command: argparse.ArgumentParser, *, default: str = "metadata") -> None:
+    command.add_argument(
+        "--checksum",
+        choices=CHECKSUM_STRATEGIES,
+        default=default,
+        help="checksum method; calculate methods read asset bytes",
+    )
+
+
+def _add_source_arguments(command: argparse.ArgumentParser) -> None:
+    command.add_argument("--source-base", help="source document URI or directory URI ending in /")
+    command.add_argument("--source-alternate", help="alternate key to use for source access")
+
+
 def _add_items_commands(subcommands: argparse._SubParsersAction) -> None:
     items = _add_command(subcommands, "items", "Work with STAC items table commands.")
     item_commands = items.add_subparsers(dest="items_command", required=True)
@@ -554,6 +688,7 @@ def _add_items_commands(subcommands: argparse._SubParsersAction) -> None:
         library_methods=("write_items_geoparquet_stream",),
     )
     to_parquet.add_argument("output_file", type=Path, help="STAC GeoParquet output path")
+    _add_collection_file_arguments(to_parquet)
     to_parquet.set_defaults(func=_items_to_parquet)
 
     promote_alternate = _add_command(
@@ -702,6 +837,8 @@ def _add_asset_lock_commands(subcommands: argparse._SubParsersAction) -> None:
         help="maximum concurrent object metadata requests",
     )
     derive.set_defaults(func=_asset_lock_derive)
+    _add_checksum_arguments(derive)
+    _add_source_arguments(derive)
 
     from_parquet = _add_command(
         asset_commands,
@@ -759,6 +896,7 @@ def _add_asset_lock_commands(subcommands: argparse._SubParsersAction) -> None:
         help="maximum concurrent object metadata requests",
     )
     validate.set_defaults(func=_asset_lock_validate)
+    _add_checksum_arguments(validate)
 
     relocate = _add_command(
         asset_commands,
@@ -803,7 +941,7 @@ def _add_asset_lock_commands(subcommands: argparse._SubParsersAction) -> None:
     relocate.add_argument(
         "--dry-run",
         action="store_true",
-        help="write planned destination lock rows without copying asset bytes",
+        help="write destination lock rows without copying asset bytes",
     )
     relocate.add_argument(
         "--overwrite",
@@ -843,6 +981,7 @@ def _add_asset_lock_commands(subcommands: argparse._SubParsersAction) -> None:
         help="maximum concurrent multipart puts per relocation task",
     )
     relocate.set_defaults(func=_asset_lock_relocate, _parser=relocate)
+    _add_checksum_arguments(relocate)
 
 
 def _add_package_commands(subcommands: argparse._SubParsersAction) -> None:
@@ -852,12 +991,13 @@ def _add_package_commands(subcommands: argparse._SubParsersAction) -> None:
         "Build a package directory from items.",
         library_methods=("build_package",),
     )
-    build.add_argument("output_dir", type=Path, help="package directory to create")
+    build.add_argument("output_dir", type=Path, help="new package directory")
     build.add_argument(
         "--asset-lock",
         type=_asset_lock_path,
         help="asset-lock Arrow IPC stream path",
     )
+    _add_collection_file_arguments(build)
     build.add_argument(
         "--includes",
         dest="includes",
@@ -897,6 +1037,49 @@ def _add_package_commands(subcommands: argparse._SubParsersAction) -> None:
         help="query referenced objects for current metadata when deriving package rows",
     )
     build.set_defaults(func=_build)
+    _add_checksum_arguments(build)
+    _add_source_arguments(build)
+
+    relocate = _add_command(
+        subcommands,
+        "relocate",
+        "Copy and verify Item assets into a new package.",
+        library_methods=("relocate_package",),
+    )
+    relocate.add_argument("output_dir", type=Path, help="new package directory")
+    relocate.add_argument(
+        "--target", required=True, help="destination directory or object-store prefix"
+    )
+    relocate.add_argument("--target-endpoint-url", help="destination object-store endpoint")
+    relocate.add_argument(
+        "--asset-keys", action="append", help="asset key to copy; repeat for multiple keys"
+    )
+    relocate.add_argument("--include-metadata-assets", action="store_true")
+    relocate.add_argument("--overwrite", action="store_true", help="overwrite destination objects")
+    relocate.add_argument("--max-workers", type=_positive_int, default=DEFAULT_COPY_MAX_WORKERS)
+    relocate.add_argument(
+        "--memory-limit-bytes", type=_byte_size, default=DEFAULT_COPY_MEMORY_LIMIT_BYTES
+    )
+    relocate.add_argument(
+        "--chunk-size-bytes", type=_byte_size, default=DEFAULT_COPY_CHUNK_SIZE_BYTES
+    )
+    relocate.add_argument(
+        "--put-max-concurrency", type=_positive_int, default=DEFAULT_COPY_PUT_MAX_CONCURRENCY
+    )
+    _add_source_arguments(relocate)
+    _add_collection_file_arguments(relocate)
+    relocate.set_defaults(func=_relocate)
+
+    validate = _add_command(
+        subcommands,
+        "validate",
+        "Check package assets and save the lock on success.",
+        library_methods=("validate_package",),
+    )
+    validate.add_argument("package", type=Path)
+    validate.add_argument("--max-workers", type=_positive_int, default=DEFAULT_COPY_MAX_WORKERS)
+    _add_checksum_arguments(validate, default="calculate-if-needed")
+    validate.set_defaults(func=_validate)
 
     inspect = _add_command(
         subcommands,
@@ -952,6 +1135,31 @@ def _add_package_commands(subcommands: argparse._SubParsersAction) -> None:
     pull.set_defaults(func=_pull)
 
 
+def _add_collections_commands(subcommands: argparse._SubParsersAction) -> None:
+    collections = _add_command(
+        subcommands,
+        "collections",
+        "Work with embedded STAC Collection metadata.",
+    )
+    collection_commands = collections.add_subparsers(
+        dest="collections_command",
+        required=True,
+    )
+    extract = _add_command(
+        collection_commands,
+        "extract",
+        "Extract embedded STAC Collection metadata documents.",
+        library_methods=("extract_collections",),
+    )
+    extract.add_argument("input_file", type=Path, help="STAC GeoParquet input path")
+    extract.add_argument(
+        "--output",
+        type=Path,
+        help="JSON output path; omit to write to stdout",
+    )
+    extract.set_defaults(func=_collections_extract)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="stacpkg",
@@ -962,6 +1170,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_package_commands(subcommands)
     _add_items_commands(subcommands)
     _add_asset_lock_commands(subcommands)
+    _add_collections_commands(subcommands)
 
     return parser
 

@@ -1,48 +1,71 @@
-# Test Layout
+# Tests
 
-Use the repository `Makefile` as the source of truth for runnable test, docs, and
-quality commands. Start with `make help`; keep command recipes there instead of
-duplicating them in this README.
+Run the local checks:
 
-[`tests/`](./) is split by runtime boundary:
+```bash
+make pre-commit docs test-unit test-integration test-distribution
+```
+
+`make docs` runs the local use cases before building their pages.
 
 | Folder | Purpose |
 | --- | --- |
-| [`unit/`](unit/) | Fast unit tests and small fixture-backed checks. No network, Docker, kind, Kubernetes, S3 store, or registry. |
-| [`usecases/`](usecases/) | Tests for `docs/usecases` workflows. Materialized Python tests are named `test_generated_*.py`, ignored by git, and created before pytest collection. |
-| [`integration/`](integration/) | Local cross-library checks using optional tools such as `rustac`, DuckDB, and `geoparquet-io`/`gpio`. No deployed services. |
-| [`e2e/`](e2e/) | Shared e2e helpers plus performance and other infra-backed tests that are not docs/usecase workflows. |
-| [`setup/`](setup/) | Kubernetes manifests for the local e2e MinIO stores and OCI registry. |
-| [`data/`](data/) | Static OpenAerialMap fixtures and fixture helper constants. |
+| `unit/` | Copy, validation, metadata, and CLI behavior with local files. |
+| `usecases/` | Installed CLI examples for relocation and offline handover. |
+| `integration/` | GeoParquet and Arrow exchange with gpio, rustac, and DuckDB. |
+| `e2e/` | S3 copies and OCI handover with live services. |
+| `data/`, `setup/` | OpenAerialMap fixtures and service manifests. |
 
-## E2E Harness
+Test a result that matters to a user: copied bytes, preserved metadata, or a
+clear failure that leaves saved data intact. Avoid checks of source text,
+internal calls, or behavior that another test already covers.
 
-The kind harness creates or reuses the `stacpkg-s3-store` cluster and namespace,
-applies the manifests in [`tests/setup/`](setup/), starts port-forwards for the
-MinIO stores and registry, exports the expected environment variables, and then
-runs pytest.
+## Examples
 
-Use case docs and generated tests are generated from shell sources in
-[`docs/usecases/`](../docs/usecases/) matching `*.sh`. The generated Markdown
-pages are written under ignored `docs/generated/usecases/` during docs builds,
-and `pytest tests/usecases` creates matching Python tests that execute the shell
-commands with local fixtures and hidden `test-assert` checks before collection.
+`docs/usecases/*.sh` supplies the use-case pages and shell tests. After editing
+a source, run `uv run python scripts/generate_usecase_tests.py`, inspect the
+generated test, then run `make test-usecases`. Setup and result-check directives
+stay out of the page. Generated files are ignored by Git. Pages include output
+from successful runs, with temporary paths shown as `/workshop`.
 
-Generated usecase tests are kept fast and local. Infra-backed service tests live
-under [`tests/e2e/`](e2e/); no `test_usecase_*.py` files should live under
-[`tests/usecases/`](usecases/).
+The S3 and OCI recipe has `# test: false` because it needs configured services.
+The service suite checks its transfer behavior separately.
 
-## OpenAerialMap Fixtures
+## Service checks
 
-The canonical fixture selection is OpenAerialMap Central Europe for calendar
-year 2025. Fixture paths and selected item IDs live in
-[`tests/data/openaerialmap_data.py`](data/openaerialmap_data.py).
+After the local checks, use Docker and the dedicated Kind cluster
+`stacpkg-s3-store`, with context `kind-stacpkg-s3-store`. Install Kind, kubectl,
+curl, OpenSSL, and `htpasswd`. The harness deploys two MinIO stores and a Basic
+auth registry in namespace `stacpkg-s3-store`. It uses public images and test
+credentials; no cloud account is needed.
 
-The central-Europe asset-lock fixtures intentionally omit the `metadata` asset
-key. Higher-level integration and e2e tests should exercise ordinary data assets
-only; explicit `metadata` asset-key inclusion belongs in focused unit tests.
+```bash
+make test-e2e       # S3 copies, failed transfers, and offline OCI handover
+make test-e2e-full  # Also time a copy between the two S3 stores
+```
 
-Fast fixture integrity checks live in
-[`tests/unit/test_openaerialmap_fixture.py`](unit/test_openaerialmap_fixture.py).
-When regenerating fixtures from live services, keep the fixture constants, row
-counts, and asset-lock expectations aligned with those tests.
+The tests compare delivered bytes with the originals and reject missing
+sources and wrong checksums. The performance check has a 120-second limit;
+set `STACPKG_TEST_S3STORE_MAX_SECONDS` to change it.
+
+The harness uses a temporary kubeconfig and removes port-forwards after the
+run. It leaves the cluster and services for inspection. It does not create a
+cluster or change the current context. Inspect existing Docker nodes before
+creating a cluster; resume usable nodes. Get approval before creating,
+stopping, or deleting a local cluster. Report service results separately from
+local results.
+
+## Release checks
+
+The Tests workflow runs these local checks before the full service suite.
+CI creates its own disposable Kind cluster. The distribution check builds the
+source archive and wheel, then tests handover and validation with the installed
+wheel in a fresh environment.
+
+A release tag must point to the exact commit of a successful Tests run from
+a push to `main`. Package builds and both publication paths wait for this
+gate. If that run is still in progress, let it finish, then rerun the release
+workflow. The tag workflow does not repeat the service suite.
+
+Prerelease tags publish their own docs. Only stable tags update the `latest`
+alias and default page.

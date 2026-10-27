@@ -13,6 +13,10 @@ from stacpkg.dataset import (
     ITEMS_PACKAGE_PATH,
     package_file_entries,
 )
+from stacpkg.geoparquet import (
+    _collections_from_metadata_payload,
+    read_stac_geoparquet_metadata,
+)
 
 
 def package_inspect_data(package_dir: str | Path) -> dict[str, Any]:
@@ -26,14 +30,29 @@ def package_inspect_data(package_dir: str | Path) -> dict[str, Any]:
     if items_path.exists():
         items = read_parquet(items_path)
         item_rows = items.to_pylist()
+        stac_geoparquet = read_stac_geoparquet_metadata(items_path)
+        embedded_collections = _collections_from_metadata_payload(
+            stac_geoparquet,
+            source=items_path,
+            required=False,
+        )
         data["items"] = {
             "count": items.num_rows,
             "collections": sorted(
                 {row["collection"] for row in item_rows if row.get("collection") is not None}
             ),
+            "stac_geoparquet_version": stac_geoparquet.get("version"),
+            "embedded_collection_count": len(embedded_collections),
+            "embedded_collection_ids": sorted(embedded_collections),
         }
     else:
-        data["items"] = {"count": 0, "collections": []}
+        data["items"] = {
+            "count": 0,
+            "collections": [],
+            "stac_geoparquet_version": None,
+            "embedded_collection_count": 0,
+            "embedded_collection_ids": [],
+        }
 
     assets_path = package_dir / ASSET_LOCK_PACKAGE_PATH
     if assets_path.exists():
@@ -49,6 +68,7 @@ def package_inspect_data(package_dir: str | Path) -> dict[str, Any]:
             ),
             "known_size_bytes": sum(known_sizes),
             "known_size_count": len(known_sizes),
+            "known_checksum_count": sum(bool(row.get("file_checksum")) for row in asset_rows),
         }
     else:
         data["assets"] = {
@@ -56,6 +76,7 @@ def package_inspect_data(package_dir: str | Path) -> dict[str, Any]:
             "asset_keys": [],
             "known_size_bytes": 0,
             "known_size_count": 0,
+            "known_checksum_count": 0,
         }
 
     return data
@@ -112,9 +133,13 @@ def package_inspect_markdown(package_dir: str | Path) -> str:
         f"- Package: `{data['package']}`",
         f"- Items: {items['count']}",
         f"- Collections: {', '.join(items['collections']) or 'none'}",
+        f"- STAC GeoParquet metadata version: {items['stac_geoparquet_version'] or 'none'}",
+        f"- Embedded Collection count: {items['embedded_collection_count']}",
+        f"- Embedded Collections: {', '.join(items['embedded_collection_ids']) or 'none'}",
         f"- Assets: {assets['count']}",
         f"- Asset keys: {', '.join(assets['asset_keys']) or 'none'}",
         f"- Known asset bytes: {assets['known_size_bytes']}",
+        f"- Assets with checksums: {assets['known_checksum_count']}",
         "",
         "## Files",
         "",

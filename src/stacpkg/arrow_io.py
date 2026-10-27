@@ -277,7 +277,8 @@ def write_terminal_table(table: pa.Table, sink: TextIO, *, max_width: int | None
 
 
 def read_parquet(path: str | Path) -> pa.Table:
-    return pq.read_table(path)
+    with pq.ParquetFile(path) as source:
+        return source.read()
 
 
 def write_parquet(table: pa.Table, path: str | Path) -> None:

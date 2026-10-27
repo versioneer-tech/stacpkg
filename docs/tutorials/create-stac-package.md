@@ -1,364 +1,65 @@
-# Create STAC Package
+# Create and share a STAC package
 
-This tutorial walks through a small `stacpkg` packaging workflow. You will
-query the OpenAerialMap STAC API over Austria, derive object metadata facts for the
-imagery assets, validate those assets, create a package, enrich the item
-metadata, and write an inspection summary.
+Start with an existing STAC selection. To copy assets to a separate target,
+use [Relocate assets](relocate-assets.md).
 
-The goal is not to cover every option. The goal is to see the shape of the
-workflow once, end to end. Start with the short path when you only need the
-package artifact. Use the step-by-step flow when you want reusable intermediate
-tables for inspection, validation, or later commands.
-
-## Short Path
-
-The example queries the OpenAerialMap STAC API at
-`https://api.imagery.hotosm.org/stac` for the `openaerialmap` collection. It
-uses a small Austria-only bounding box, sorts by `start_datetime` oldest first,
-and limits the response to two Items.
-
-OpenAerialMap items can include `metadata`, `thumbnail`, and `visual` assets.
-`stacpkg build` skips `metadata` assets by default, so the package asset lock
-contains the `thumbnail` and `visual` assets used in this sample.
-
-This shortest flow streams the selected STAC Items into a package directory
-without writing an items checkpoint first. Run the commands in the same shell so
-`$tmpdir` remains available:
-
-!!! note
-    We recommend the [`rustac` CLI](https://github.com/stac-utils/rustac) for
-    this short path because it is fast and stream-oriented. You can also use
-    `pystac-client` or direct HTTP calls; the
-    [step-by-step checkpoints](#step-by-step-checkpoints) below demonstrate the
-    direct HTTP path with `curl`.
+## Keep existing asset locations
 
 ```bash
-tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/stacpkg-openaerialmap-austria.XXXXXX")
-export STACPKG_TUTORIAL_DIR="$tmpdir"
-bbox='16.415,47.1705,16.431,47.734' # subset of Austria
-
-rustac --output-format ndjson search \
-    https://api.imagery.hotosm.org/stac \
-    - \
-    --collections openaerialmap \
-    --bbox "$bbox" \
-    --sortby start_datetime \
-    --max-items 2 \
-  | stacpkg items from-ndjson \
-  | stacpkg build "$tmpdir/openaerialmap-austria.pkg"
-
-echo "created $tmpdir/openaerialmap-austria.pkg"
+stacpkg items from-json selection.json \
+  | stacpkg build selection.pkg --checksum calculate-always
 ```
 
-Sample output:
+Build writes the two tables in the [package format](../architecture/0001-package-and-pipelines.md).
+Choose a new package directory. Build makes it available after all files are ready.
+The example reads bytes to calculate checksums. The default method, `metadata`,
+uses storage metadata. `--no-probe-metadata` skips those initial queries.
 
-```text
-created /tmp/stacpkg-openaerialmap-austria.ABC123/openaerialmap-austria.pkg
-```
-
-The command creates this package layout:
-
-```text
-/tmp/stacpkg-openaerialmap-austria.ABC123/openaerialmap-austria.pkg/
-  items.parquet
-  assets.lock.parquet
-```
-
-This package can now be pushed to any OCI-compliant registry; see
-[Distribute The Package](#distribute-the-package) below.
-
-Validate the package's asset lock whenever you want to check the recorded object
-metadata against the current live assets:
+## Include asset bytes
 
 ```bash
-stacpkg asset-lock from-parquet "$tmpdir/openaerialmap-austria.pkg/assets.lock.parquet" \
-  | stacpkg asset-lock validate
+stacpkg items from-json selection.json \
+  | stacpkg build offline.pkg --include-assets --include-metadata-assets
+
+cp -R offline.pkg delivered.pkg
+stacpkg validate delivered.pkg > validation.jsonl
 ```
 
-## Step-by-Step Checkpoints
+Build copies Item assets under `assets/`, checks their contents, and writes
+relative target hrefs. `--include-metadata-assets` also copies the `metadata`
+asset key, which is skipped by default. Copying still checks bytes when initial
+metadata probing is disabled.
 
-The rest of this tutorial expands the same workflow into materialized
-checkpoints under `$tmpdir`. This is useful when you want to inspect the selected
-Items, validate the asset lock before building, or reuse an intermediate table
-in another command.
+See [Offline handover](../generated/usecases/offline-package-handover.md)
+for a complete run and its output.
 
-### Materialize The Items
+Validation prints asset results and a summary. It replaces the lock only
+after all required assets pass. Failure keeps the prior lock and returns a
+non-zero exit code. A first checksum observation establishes a baseline.
 
-Create a temporary directory, then use a plain STAC API `curl` request to fetch
-one small ItemCollection response. `items from-json` adapts that STAC JSON into
-the items Arrow stream, and `items to-parquet` writes a reusable STAC
-GeoParquet-style checkpoint:
+## Keep Collection metadata and context
+
+Add `--collection collection.json` to build. Repeat it for several documents;
+each file can hold one Collection or an array. Complete documents and extension
+fields stay in the Parquet metadata. Add notes or a license with `--includes PATH`.
+
+Extract Collection documents when a consumer needs JSON:
 
 ```bash
-tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/stacpkg-openaerialmap-austria.XXXXXX")
-export STACPKG_TUTORIAL_DIR="$tmpdir"
-bbox='16.415,47.1705,16.431,47.734' # subset of Austria
-
-curl -fsS https://api.imagery.hotosm.org/stac/search \
-  --header "Accept: application/geo+json" \
-  --header "Content-Type: application/json" \
-  --data-binary "{
-    \"collections\": [\"openaerialmap\"],
-    \"bbox\": [$bbox],
-    \"sortby\": [{\"field\": \"start_datetime\", \"direction\": \"asc\"}],
-    \"limit\": 2
-  }" \
-  | stacpkg items from-json \
-  | stacpkg items to-parquet "$tmpdir/openaerialmap-austria.items.parquet"
-
-echo "created $tmpdir/openaerialmap-austria.items.parquet"
+stacpkg collections extract selection.pkg/items.parquet --output collections.json
 ```
 
-Sample output:
+Extraction keeps stored hrefs and the source dataset description.
 
-```text
-created /tmp/stacpkg-openaerialmap-austria.ABC123/openaerialmap-austria.items.parquet
-```
-
-This `curl` request asks the STAC API for one two-item response. It does not page
-through all matches. For larger searches, prefer the NDJSON `rustac` path from
-the short flow so `stacpkg items from-ndjson` can stream item batches into Arrow
-IPC.
-
-Rendered as selected columns, the source selection now looks like this.
-
-| item_id | collection | start_datetime | title | asset keys |
-| --- | --- | --- | --- | --- |
-| `631ee6653cdf1c0006b63c5b` | `openaerialmap` | `2022-07-28T13:20:34Z` | `Winzerstrasse - 28.7.2022` | `metadata`, `thumbnail`, `visual` |
-| `631ee8593cdf1c0006b63c5f` | `openaerialmap` | `2022-07-28T16:11:00Z` | `Brundlgfangen - 28.7.2022` | `metadata`, `thumbnail`, `visual` |
-
-### Lock Asset Metadata
-
-Create an asset lock with probed metadata for all non-metadata assets:
+## Share through OCI
 
 ```bash
-stacpkg items from-parquet "$tmpdir/openaerialmap-austria.items.parquet" \
-  | stacpkg asset-lock derive \
-  | stacpkg asset-lock to-parquet "$tmpdir/openaerialmap-austria.assets.lock.parquet"
-
-echo "created $tmpdir/openaerialmap-austria.assets.lock.parquet"
+stacpkg push offline.pkg registry.example/eo/selection:demo
+stacpkg pull registry.example/eo/selection:demo --output-dir restored.pkg
+stacpkg validate restored.pkg
 ```
 
-Sample output:
-
-```text
-created /tmp/stacpkg-openaerialmap-austria.ABC123/openaerialmap-austria.assets.lock.parquet
-```
-
-The lock has one row per non-metadata asset. For this sample that is two Items
-times the `thumbnail` and `visual` asset keys, or four asset lock rows.
-
-Rendered as selected columns, the metadata lock looks like this:
-
-| item_id | asset_key | store_type | store_container | key | size_bytes | etag | last_modified |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `631ee6653cdf1c0006b63c5b` | `thumbnail` | `https` | `https://oin-hotosm-temp.s3.amazonaws.com` | `631ee60c.../631ee60c...png` | `793014` | `"81acb9dabba94aa59ab376948bf46259"` | `2025-01-16T18:35:01+00:00` |
-| `631ee6653cdf1c0006b63c5b` | `visual` | `https` | `https://oin-hotosm-temp.s3.amazonaws.com` | `631ee60c.../631ee60c...tif` | `9913534` | `"7d1bfba6a65db543052fa6d7b4187e64-2"` | `2025-01-16T18:35:01+00:00` |
-| `631ee8593cdf1c0006b63c5f` | `thumbnail` | `https` | `https://oin-hotosm-temp.s3.amazonaws.com` | `631ee840.../631ee840...png` | `609308` | `"c1797f27c862a7ece7a05dbb4f505171"` | `2025-01-16T18:35:02+00:00` |
-| `631ee8593cdf1c0006b63c5f` | `visual` | `https` | `https://oin-hotosm-temp.s3.amazonaws.com` | `631ee840.../631ee840...tif` | `5434212` | `"552f232cc25c681bf4457572522cefbd"` | `2025-01-16T18:35:02+00:00` |
-
-### Validate The Assets
-
-Use the metadata-probed asset lock to validate the recorded provenance facts
-against the current live assets:
-
-```bash
-stacpkg asset-lock from-parquet "$tmpdir/openaerialmap-austria.assets.lock.parquet" \
-  | stacpkg asset-lock validate
-```
-
-Sample output:
-
-```json
-{"asset_key":"thumbnail","errors":[],"item_id":"631ee6653cdf1c0006b63c5b","key":"631ee60c3cdf1c0006b63c56/0/631ee60c3cdf1c0006b63c57.png","store_container":"https://oin-hotosm-temp.s3.amazonaws.com","store_type":"https","valid":true}
-{"asset_key":"visual","errors":[],"item_id":"631ee6653cdf1c0006b63c5b","key":"631ee60c3cdf1c0006b63c56/0/631ee60c3cdf1c0006b63c57.tif","store_container":"https://oin-hotosm-temp.s3.amazonaws.com","store_type":"https","valid":true}
-{"asset_key":"thumbnail","errors":[],"item_id":"631ee8593cdf1c0006b63c5f","key":"631ee8403cdf1c0006b63c5d/0/631ee8403cdf1c0006b63c5e.png","store_container":"https://oin-hotosm-temp.s3.amazonaws.com","store_type":"https","valid":true}
-{"asset_key":"visual","errors":[],"item_id":"631ee8593cdf1c0006b63c5f","key":"631ee8403cdf1c0006b63c5d/0/631ee8403cdf1c0006b63c5e.tif","store_container":"https://oin-hotosm-temp.s3.amazonaws.com","store_type":"https","valid":true}
-```
-
-Validation prints dynamic JSON lines and exits non-zero if any asset no longer
-matches the lock.
-
-### Build A Package
-
-Create a package directory from the selected Items and the validated asset
-lock:
-
-```bash
-stacpkg items from-parquet "$tmpdir/openaerialmap-austria.items.parquet" \
-  | stacpkg build "$tmpdir/openaerialmap-austria.pkg" \
-      --asset-lock <(stacpkg asset-lock from-parquet \
-        "$tmpdir/openaerialmap-austria.assets.lock.parquet")
-
-echo "created $tmpdir/openaerialmap-austria.pkg/items.parquet"
-echo "created $tmpdir/openaerialmap-austria.pkg/assets.lock.parquet"
-```
-
-Sample output:
-
-```text
-created /tmp/stacpkg-openaerialmap-austria.ABC123/openaerialmap-austria.pkg/items.parquet
-created /tmp/stacpkg-openaerialmap-austria.ABC123/openaerialmap-austria.pkg/assets.lock.parquet
-```
-
-The package contains:
-
-```text
-/tmp/stacpkg-openaerialmap-austria.ABC123/openaerialmap-austria.pkg/
-  items.parquet
-  assets.lock.parquet
-```
-
-At this point the package has snapshotted the selected STAC Items and the
-validated asset lock rows.
-
-### Inspect The Asset Lock
-
-Read the package's asset lock when you want to see referenced assets as rows:
-
-```bash
-stacpkg asset-lock from-parquet "$tmpdir/openaerialmap-austria.pkg/assets.lock.parquet"
-```
-
-Sample terminal output:
-
-```text
-item_id                  | asset_key | store_type | size_bytes
--------------------------+-----------+------------+-----------
-631ee6653cdf1c0006b63c5b | thumbnail | https      | 793014
-631ee6653cdf1c0006b63c5b | visual    | https      | 9913534
-4 rows x 9 columns
-```
-
-This matches the four rows from the earlier "Lock Asset Metadata" section:
-`stacpkg build` placed that validated asset lock into the package as
-`assets.lock.parquet`.
-
-The items table answers which STAC records were selected. The asset lock answers
-which asset files those records reference and what object metadata was observed.
-
-### Enrich The STAC Items
-
-The OpenAerialMap objects are also available through public S3. Write asset
-metadata and S3 alternate hrefs back into STAC GeoParquet. First create an
-S3-shaped asset lock from the package lock. This maps HTTPS locations to
-equivalent `s3://` hrefs without copying bytes:
-
-```bash
-stacpkg asset-lock from-parquet "$tmpdir/openaerialmap-austria.pkg/assets.lock.parquet" \
-  | stacpkg asset-lock relocate \
-      --dry-run \
-      --source-prefix https://oin-hotosm-temp.s3.amazonaws.com/ \
-      --store-type s3 \
-      --store-container oin-hotosm-temp \
-      --store-endpoint-url https://s3.amazonaws.com \
-      --layout source-key \
-  | stacpkg asset-lock to-parquet "$tmpdir/openaerialmap-austria.s3.assets.lock.parquet"
-
-echo "created $tmpdir/openaerialmap-austria.s3.assets.lock.parquet"
-```
-
-Sample output:
-
-```text
-created /tmp/stacpkg-openaerialmap-austria.ABC123/openaerialmap-austria.s3.assets.lock.parquet
-```
-
-Then enrich the items from that mapped lock:
-
-```bash
-stacpkg items from-parquet "$tmpdir/openaerialmap-austria.pkg/items.parquet" \
-  | stacpkg items enrich \
-      --asset-lock <(stacpkg asset-lock from-parquet \
-        "$tmpdir/openaerialmap-austria.s3.assets.lock.parquet") \
-      --alternate-key s3 \
-  | stacpkg items to-parquet "$tmpdir/openaerialmap-austria.enriched.items.parquet"
-
-echo "created $tmpdir/openaerialmap-austria.enriched.items.parquet"
-```
-
-Sample output:
-
-```text
-created /tmp/stacpkg-openaerialmap-austria.ABC123/openaerialmap-austria.enriched.items.parquet
-```
-
-This keeps the asset lock as the package contract while making selected fields
-and `alternate.s3.href` values available to STAC clients.
-
-For the first selected thumbnail, the enriched STAC asset now includes:
-
-```json
-{
-  "href": "https://oin-hotosm-temp.s3.amazonaws.com/631ee60c3cdf1c0006b63c56/0/631ee60c3cdf1c0006b63c57.png",
-  "alternate": {
-    "s3": {
-      "href": "s3://oin-hotosm-temp/631ee60c3cdf1c0006b63c56/0/631ee60c3cdf1c0006b63c57.png"
-    }
-  }
-}
-```
-
-### Inspect The Package
-
-Create a package summary:
-
-```bash
-stacpkg inspect "$tmpdir/openaerialmap-austria.pkg" > "$tmpdir/inspect.yaml"
-
-echo "created $tmpdir/inspect.yaml"
-```
-
-Sample output:
-
-```text
-created /tmp/stacpkg-openaerialmap-austria.ABC123/inspect.yaml
-```
-
-Sample `$tmpdir/inspect.yaml` contents:
-
-```yaml
-package: "/tmp/stacpkg-openaerialmap-austria.ABC123/openaerialmap-austria.pkg"
-items:
-  count: 2
-  collections:
-    - "openaerialmap"
-assets:
-  count: 4
-  asset_keys:
-    - "thumbnail"
-    - "visual"
-  known_size_bytes: 16750068
-  known_size_count: 4
-```
-
-Open `$tmpdir/inspect.yaml` and check the item count, asset count, and package
-files.
-
-### Distribute The Package
-
-You can now push this package to any OCI-compliant registry and pull it back in
-another environment. Use `$tmpdir/openaerialmap-austria.pkg` as the package
-directory for `stacpkg push`; `stacpkg pull` reconstructs the same
-`items.parquet` and `assets.lock.parquet` files.
-
-See the [package commands](../reference-guides/cli.md#package-commands) in the
-CLI reference for the `push` and `pull` syntax, including local HTTP registry
-options.
-
-## What You Learned
-
-You streamed an OpenAerialMap Austria STAC search directly into a package, then
-expanded the same workflow with materialized checkpoints. The package now has:
-
-- the exact selected Items in `items.parquet`;
-- validated object metadata in `assets.lock.parquet`;
-- package file metadata derived from the package directory and OCI descriptors;
-- dynamic validation results for current assets;
-- an enriched items table and a package inspection summary;
-- an OCI-distributable package that can be pushed and pulled.
-
-Related OpenAerialMap package examples live in the generated
-[`OpenAerialMap Package Inputs and Relocation`](../generated/usecases/openaerialmap-package-inputs-and-relocation.md)
-and [`OpenAerialMap Package Handover to Recipient Storage`](../generated/usecases/openaerialmap-package-handover-to-recipient-storage.md)
-use case pages.
+Pull checks layer digests and sizes. Its output directory must not exist.
+It transfers included files; external assets must remain accessible to the
+recipient. Registry credentials come from runtime settings. Use `validate` for
+asset checks after delivery, as shown above.

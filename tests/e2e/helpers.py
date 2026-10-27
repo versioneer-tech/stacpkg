@@ -7,9 +7,6 @@ import hashlib
 import hmac
 import logging
 import os
-import threading
-from contextlib import contextmanager
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import quote, urlparse
@@ -24,11 +21,6 @@ from stacpkg.object_store import _bucket_config_env_name, _configured_s3_config
 LOGGER = logging.getLogger(__name__)
 S3STORE1_BUCKET = "stacpkg-e2e-s3store1"
 S3STORE2_BUCKET = "stacpkg-e2e-s3store2"
-
-# AWS CLI examples for the library helpers below:
-# aws --endpoint-url "$ENDPOINT" s3api create-bucket --bucket "$BUCKET"
-# aws --endpoint-url "$ENDPOINT" s3api put-object --bucket "$BUCKET" --key "$KEY" --body "$FILE"
-# aws --endpoint-url "$ENDPOINT" s3api head-object --bucket "$BUCKET" --key "$KEY"
 
 
 def endpoint_env() -> dict[str, str]:
@@ -229,37 +221,3 @@ def put_object(
         len(payload),
     )
     obs.put(_s3_store(endpoint, bucket), key, payload, mode="overwrite")
-
-
-@contextmanager
-def remote_asset_server(root: Path):
-    class Handler(SimpleHTTPRequestHandler):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, directory=str(root), **kwargs)
-
-        def log_message(self, format: str, *args) -> None:  # noqa: A002
-            return
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    url = f"http://127.0.0.1:{server.server_port}"
-    LOGGER.debug("started local remote-asset HTTP server: root=%s url=%s", root, url)
-    try:
-        yield url
-    finally:
-        LOGGER.debug("stopping local remote-asset HTTP server: url=%s", url)
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
-
-
-def head_size(endpoint: str, env: dict[str, str], bucket: str, key: str) -> int:
-    del env
-    LOGGER.debug("checking object size: endpoint=%s bucket=%s key=%s", endpoint, bucket, key)
-    head = obs.head(_s3_store(endpoint, bucket), key)
-    size = int(head["size"])
-    LOGGER.debug(
-        "object size verified by head request: bucket=%s key=%s size=%s", bucket, key, size
-    )
-    return size

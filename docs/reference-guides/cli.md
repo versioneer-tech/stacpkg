@@ -1,626 +1,271 @@
-# CLI Reference
+# CLI reference
 
-The CLI has package lifecycle commands and two table namespaces:
+Package commands work with directories. Table commands use Arrow IPC on stdin
+and stdout. When stdout is a terminal, table output is a short text preview.
 
-- `items` for STAC items tables.
-- `asset-lock` for asset-lock tables.
+## Streams and files
 
-Table commands compose through Arrow IPC streams on stdin and stdout. Parquet
-files enter a pipeline through `from-parquet` commands and leave a pipeline
-through `to-parquet` commands. STAC JSON ItemCollection documents enter through
-`items from-json`; newline-delimited STAC Items enter through `items
-from-ndjson`. `from-parquet` adapters stream Parquet rows as IPC batches, and
-`items from-ndjson` writes IPC batches as NDJSON lines are read. `items
-to-parquet` and `asset-lock to-parquet` write incoming IPC batches directly to
-Parquet when their input comes from a piped Arrow stream. These adapter paths do
-not load whole Parquet files or whole IPC streams as Arrow tables. Items
-transforms preserve the concrete Arrow stream schema and process piped input
-batch-by-batch. Interactive terminal output remains display-oriented and renders
-a bounded preview.
+Use `from-parquet` and `to-parquet` to enter or leave a table pipeline.
+The adapters and Item transforms process batches. Package planning and
+validation hold the selection in memory.
 
-Option-based asset-lock inputs use the same boundary: `--asset-lock` is a path
-to an Apache Arrow IPC stream. The path may name a regular file, FIFO, or shell
-process-substitution path. It does not read `-` from stdin, because stdin is
-reserved for the primary items stream on commands such as `build`,
-`items add-alternate`, and `items enrich`. When starting from an asset-lock
-Parquet checkpoint, adapt it explicitly with `stacpkg asset-lock from-parquet`.
-
-In the current version, items Parquet files are written as STAC GeoParquet-style
-tables. The STAC GeoParquet core fields and metadata are normalized by the items
-writer. Concrete property, extension, and asset-struct columns come from the
-Arrow stream schema; transforms preserve existing columns and only add or remove
-the nested asset fields they are responsible for. Asset-lock Parquet files use
-the schema described in the [Asset Lock reference](asset-lock.md).
-
-## Command Overview
-
-| CLI command | Arrow stream input | Arrow stream output | Description |
-| --- | --- | --- | --- |
-| `build` | Items table | No | Build a package directory from items. |
-| `inspect` | No | No | Inspect package contents as YAML, JSON, or Markdown. |
-| `push` | No | No | Push package artifacts to an OCI registry. |
-| `pull` | No | No | Pull package artifacts from an OCI registry. |
-| `items from-json` | No | Items table | Convert STAC JSON into items Arrow streams. |
-| `items from-ndjson` | No | Items table | Convert STAC NDJSON into items Arrow streams. |
-| `items from-parquet` | No | Items table | Read STAC GeoParquet as Arrow IPC. |
-| `items to-parquet` | Items table | No | Write items streams as STAC GeoParquet. |
-| `items promote-alternate` | Items table | Items table | Promote alternate asset hrefs in items streams. |
-| `items remove-alternate` | Items table | Items table | Remove alternate asset hrefs in items streams. |
-| `items add-alternate` | Items table | Items table | Add alternate asset hrefs in items streams. |
-| `items enrich` | Items table | Items table | Write asset lock facts into items. |
-| `asset-lock derive` | Items table | Asset-lock table | Derive asset lock rows from items streams. |
-| `asset-lock from-parquet` | No | Asset-lock table | Read asset-lock Parquet as Arrow IPC. |
-| `asset-lock to-parquet` | Asset-lock table | No | Write asset-lock streams as Parquet. |
-| `asset-lock validate` | Asset-lock table | No | Validate current assets against locked facts. |
-| `asset-lock relocate` | Asset-lock table | Asset-lock table | Plan or relocate asset bytes into lock locations. |
-
-Each command section starts with the same short description used by CLI help,
-then lists arguments and options, then gives usage notes and examples.
-
-## Package Commands
-
-### `stacpkg build OUTPUT_DIR`
-
-**Description:** Build a package directory from items.
-
-| Argument or option | Required | Default | Description |
-| --- | --- | --- | --- |
-| `OUTPUT_DIR` | Yes | - | Package directory to create. |
-| `--asset-lock PATH` | No | Derived from input items | Asset-lock Arrow IPC stream path. |
-| `--includes PATH` | No | None | File or directory to include; repeat for multiple paths. |
-| `--include-assets` | No | `false` | Relocate referenced asset bytes into the package directory. |
-| `--include-metadata-assets` | No | `false` | Include assets whose asset key is `metadata`. |
-| `--item-ids ITEM_ID` | No | All item ids | Item id to package; repeat for multiple item ids. |
-| `--providers PROVIDER` | No | All providers | Provider name to package; repeat for multiple provider names. |
-| `--probe-metadata`, `--no-probe-metadata` | No | `true` | Query referenced objects for current metadata when deriving package rows. |
-
-Build a package directory from an items stream. By default, `build` creates
-`items.parquet` and `assets.lock.parquet`. When `--asset-lock`
-is omitted, the command derives `assets.lock.parquet` from the selected items.
-The derived lock queries current object metadata facts by default and skips
-`metadata` assets unless `--include-metadata-assets` is set. Use
-`--no-probe-metadata` for a fast or offline derivation that only reuses facts
-already present in the STAC item metadata.
+`--asset-lock PATH` takes an Arrow IPC file, FIFO, or process-substitution
+path. It does not take Parquet or `-`; stdin carries the Items stream.
 
 ```bash
-stacpkg items from-parquet source.items.parquet \
-  | stacpkg build stacpkg.pkg/
-```
-
-Use `--providers` or `--item-ids` to package only a selected subset of the input
-items table. Both options may be repeated.
-
-```bash
-stacpkg items from-parquet openaerialmap.items.parquet \
-  | stacpkg build webodm.pkg/ --providers WebODM
-```
-
-Use an existing asset lock when it should not be recreated:
-
-```bash
-stacpkg items from-parquet source.items.parquet \
-  | stacpkg build stacpkg.pkg/ \
-      --asset-lock <(stacpkg asset-lock from-parquet source.assets.lock.parquet)
-```
-
-Include referenced asset bytes in the package directory:
-
-```bash
-stacpkg items from-parquet source.items.parquet \
-  | stacpkg build self-contained.pkg/ --include-assets
-```
-
-The package asset lock is mandatory. When `--asset-lock` is omitted, `build`
-derives the listing from the selected items.
-
----
-
-### `stacpkg inspect PACKAGE`
-
-**Description:** Inspect package contents as YAML, JSON, or Markdown.
-
-| Argument or option | Required | Default | Description |
-| --- | --- | --- | --- |
-| `PACKAGE` | Yes | - | Package directory to inspect. |
-| `--format {yaml,json,markdown,md}` | No | `yaml` | Summary output format. |
-
-Write a package summary to stdout. YAML is the default for terminal-friendly
-inspection; JSON is useful for tools; Markdown is useful for reports.
-
-```bash
-stacpkg inspect stacpkg.pkg/
-stacpkg inspect stacpkg.pkg/ --format json > inspect.json
-stacpkg inspect stacpkg.pkg/ --format markdown > inspect.md
-```
-
----
-
-### `stacpkg push PACKAGE TARGET`
-
-**Description:** Push package artifacts to an OCI registry.
-
-| Argument or option | Required | Default | Description |
-| --- | --- | --- | --- |
-| `PACKAGE` | Yes | - | Package directory to push. |
-| `TARGET` | Yes | - | OCI registry target reference. |
-| `--auth-backend BACKEND` | No | `token` | oras-py authentication backend. |
-| `--plain-http` | No | `false` | Use plain HTTP for the registry. |
-| `--insecure` | No | `false` | Disable TLS certificate checks. |
-
-Push a package directory as an OCI artifact with typed layers for the required
-tables, optional file ZIPs, and materialized asset bytes. The default
-authentication backend is `token`, which preserves the existing bearer-token
-flow.
-
-```bash
-stacpkg push stacpkg.pkg/ ghcr.io/example/stacpkg/openaerialmap-austria:v1
-```
-
-Use `--auth-backend basic` for a registry that accepts HTTP Basic
-authentication without issuing bearer tokens. oras-py reads credentials from
-its supported runtime configuration, including `ORAS_USER`, `ORAS_PASS`, and
-Docker authentication configuration. Do not put credentials in package files
-or command arguments.
-
-```bash
-export ORAS_USER="example-user"
-export ORAS_PASS="<registry-password>"
-stacpkg push stacpkg.pkg/ registry.example/stacpkg/example:v1 \
-  --auth-backend basic
-```
-
-Basic authentication should normally be used over HTTPS. `--plain-http` only
-changes HTTPS to HTTP, and `--insecure` only disables TLS certificate
-verification. Neither option is required merely because Basic authentication
-is selected. For a local HTTP registry, add `--plain-http`.
-
----
-
-### `stacpkg pull SOURCE --output-dir OUTPUT_DIR`
-
-**Description:** Pull package artifacts from an OCI registry.
-
-| Argument or option | Required | Default | Description |
-| --- | --- | --- | --- |
-| `SOURCE` | Yes | - | OCI registry source reference. |
-| `--output-dir PATH` | Yes | - | Package directory to write. |
-| `--auth-backend BACKEND` | No | `token` | oras-py authentication backend. |
-| `--plain-http` | No | `false` | Use plain HTTP for the registry. |
-| `--insecure` | No | `false` | Disable TLS certificate checks. |
-
-Pull a package artifact from an OCI registry and reconstruct the package
-directory from its typed layers. The default authentication backend is `token`.
-
-```bash
-stacpkg pull ghcr.io/example/stacpkg/openaerialmap-austria:v1 --output-dir stacpkg.pkg/
-```
-
-Pull from a Basic-auth registry with the same oras-py runtime credentials:
-
-```bash
-export ORAS_USER="example-user"
-export ORAS_PASS="<registry-password>"
-stacpkg pull registry.example/stacpkg/example:v1 \
-  --output-dir stacpkg.pkg/ \
-  --auth-backend basic
-```
-
-Basic authentication does not imply plain HTTP or disabled certificate
-verification. Use `--plain-http` only for an HTTP registry and `--insecure`
-only when TLS certificate verification must be disabled.
-
-The Python API exposes the same backend selection:
-
-```python
-from stacpkg.oci import pull_package, push_package
-
-push_package(package, target, auth_backend="basic")
-pull_package(source, output, auth_backend="basic")
-```
-
-## Item Commands
-
-### `stacpkg items from-json [INPUT_FILE]`
-
-**Description:** Convert STAC JSON into items Arrow streams.
-
-| Argument or option | Required | Default | Description |
-| --- | --- | --- | --- |
-| `INPUT_FILE` | No | `stdin` | STAC JSON path; omit for stdin. |
-| `--collections COLLECTION` | No | All collections | Collection id to keep; repeat for multiple collection ids. |
-| `--providers PROVIDER` | No | All providers | Provider name to keep; repeat for multiple provider names. |
-| `--item-ids ITEM_ID` | No | All item ids | Item id to keep; repeat for multiple item ids. |
-
-Convert a STAC Item or ItemCollection JSON document into a STAC
-GeoParquet-shaped items Arrow IPC stream.
-
-```bash
-stacpkg items from-json selection.itemcollection.json
-```
-
-Omit the path to read JSON from stdin. Use `--collections`, `--providers`, or
-`--item-ids` to start the stream from only matching items. Repeat an option to
-keep any matching value for that field.
-
----
-
-### `stacpkg items from-ndjson [INPUT_FILE]`
-
-**Description:** Convert STAC NDJSON into items Arrow streams.
-
-| Argument or option | Required | Default | Description |
-| --- | --- | --- | --- |
-| `INPUT_FILE` | No | `stdin` | STAC NDJSON path; omit for stdin. |
-| `--batch-size ROWS` | No | `64000` | Maximum rows per IPC batch while reading STAC items NDJSON. |
-| `--collections COLLECTION` | No | All collections | Collection id to keep; repeat for multiple collection ids. |
-| `--providers PROVIDER` | No | All providers | Provider name to keep; repeat for multiple provider names. |
-| `--item-ids ITEM_ID` | No | All item ids | Item id to keep; repeat for multiple item ids. |
-
-Convert newline-delimited STAC Item JSON into a STAC GeoParquet-shaped items
-Arrow IPC stream. Blank lines are ignored. The command opens the Arrow IPC
-stream as soon as the first non-empty batch is available, so it can bridge tools
-that emit one STAC Item JSON object per line.
-
-```bash
-stacpkg items from-ndjson selection.ndjson
-```
-
-For example, pipe `rustac` NDJSON search output directly into package creation:
-
-```bash
-rustac -o ndjson search https://api.imagery.hotosm.org/stac \
-  --collections openaerialmap \
-  --bbox 5,45,25,55 \
-  --datetime 2025-01-01T00:00:00Z/2025-12-31T23:59:59Z \
-  - \
-  | stacpkg items from-ndjson \
-  | stacpkg build openaerialmap.pkg/
-```
-
-Omit the path to read NDJSON from stdin. The command streams item batches rather
-than loading the whole NDJSON document. Use `--batch-size` to tune the maximum
-rows per IPC batch. The first emitted batch fixes the Arrow stream schema; later
-batches are aligned to that schema.
-
-Use `--collections`, `--providers`, or `--item-ids` to filter rows while reading
-batches. Repeat an option to keep any matching value for that field.
-
----
-
-### `stacpkg items from-parquet INPUT_FILE`
-
-**Description:** Read STAC GeoParquet as Arrow IPC.
-
-| Argument or option | Required | Default | Description |
-| --- | --- | --- | --- |
-| `INPUT_FILE` | Yes | - | STAC GeoParquet input path. |
-| `--batch-size ROWS` | No | `64000` | Maximum rows per IPC batch while reading Parquet. |
-| `--collections COLLECTION` | No | All collections | Collection id to keep; repeat for multiple collection ids. |
-| `--providers PROVIDER` | No | All providers | Provider name to keep; repeat for multiple provider names. |
-| `--item-ids ITEM_ID` | No | All item ids | Item id to keep; repeat for multiple item ids. |
-
-Read a STAC GeoParquet items file and write an items Arrow IPC stream.
-
-```bash
-stacpkg items from-parquet source.items.parquet
-```
-
-The command iterates Parquet `RecordBatch` values rather than loading the whole
-file. Use `--batch-size` to tune the maximum rows per IPC batch while reading
-the Parquet file.
-
-Use `--collections`, `--providers`, or `--item-ids` to filter rows while reading
-batches. Repeat an option to keep any matching value for that field. Provider
-matching checks structured `providers[].name` values and common provider
-properties such as `provider` and `oam:producer_name`.
-
----
-
-### `stacpkg items to-parquet OUTPUT_FILE`
-
-**Description:** Write items streams as STAC GeoParquet.
-
-| Argument or option | Required | Default | Description |
-| --- | --- | --- | --- |
-| `OUTPUT_FILE` | Yes | - | STAC GeoParquet output path. |
-
-Read a STAC GeoParquet-shaped items Arrow IPC stream from stdin and write a STAC
-GeoParquet-style items table. The concrete property, extension, and asset columns
-are taken from the incoming Arrow schema, so the command can write Parquet
-batches without first loading the full stream as a table.
-
-```bash
-stacpkg items from-json selection.itemcollection.json \
-  | stacpkg items to-parquet selection.items.parquet
-```
-
----
-
-### `stacpkg items promote-alternate --alternate-key KEY`
-
-**Description:** Promote alternate asset hrefs in items streams.
-
-| Argument or option | Required | Default | Description |
-| --- | --- | --- | --- |
-| `--alternate-key KEY`, `--key KEY` | Yes | - | Alternate asset map key to promote. |
-| `--mode {replace,switch}` | No | `replace` | Promotion mode to apply. |
-| `--switched-alternate-name NAME` | No | `original` | `alternate:name` to use for the demoted primary href in switch mode. |
-| `--drop-alternates` | No | `false` | Remove the alternate asset map after replace promotion. |
-
-Promote `asset.alternate[KEY].href` to the primary `asset.href` and write the
-resulting items stream.
-
-```bash
-stacpkg items from-parquet source.items.parquet \
-  | stacpkg items promote-alternate --alternate-key s3 --mode replace \
-  | stacpkg asset-lock derive
-```
-
-`--mode replace` makes the alternate href primary. `--mode switch` also moves the
-previous primary href back to `alternate[KEY].href`. In switch mode, the demoted
-primary gets `alternate:name: original` unless `--switched-alternate-name` is set.
-Use `--drop-alternates` with `--mode replace` when the promoted stream should not
-carry the alternate asset map forward.
-
----
-
-### `stacpkg items remove-alternate --alternate-key KEY`
-
-**Description:** Remove alternate asset hrefs in items streams.
-
-| Argument or option | Required | Default | Description |
-| --- | --- | --- | --- |
-| `--alternate-key KEY`, `--key KEY` | Yes | - | Alternate asset map key to remove. |
-
-Remove `asset.alternate[KEY]` without changing the primary `asset.href`.
-
-```bash
-stacpkg items from-parquet source.items.parquet \
-  | stacpkg items remove-alternate --alternate-key s3 \
-  | stacpkg items to-parquet without-s3-alternate.items.parquet
-```
-
----
-
-### `stacpkg items add-alternate --asset-lock PATH --alternate-key KEY`
-
-**Description:** Add alternate asset hrefs in items streams.
-
-| Argument or option | Required | Default | Description |
-| --- | --- | --- | --- |
-| `--asset-lock PATH` | Yes | - | Asset-lock Arrow IPC stream path with alternate hrefs to add. |
-| `--alternate-key KEY`, `--key KEY` | Yes | - | Alternate asset map key to write. |
-| `--alternate-name NAME`, `--name NAME` | No | `--alternate-key` | `alternate:name` to write; defaults to `--alternate-key`. |
-
-Add asset lock hrefs to STAC items metadata as alternate asset hrefs.
-`--asset-lock` must point at an Apache Arrow IPC stream. Use
-`asset-lock from-parquet` when the lock currently lives as Parquet.
-
-```bash
-stacpkg items from-parquet source.items.parquet \
-  | stacpkg items add-alternate \
-      --asset-lock <(stacpkg asset-lock from-parquet asset-lock.parquet) \
-      --alternate-key mirror \
-      --alternate-name "Mirror" \
-  | stacpkg items to-parquet projected.items.parquet
-```
-
-`--alternate-key` selects the `asset.alternate[KEY]` map entry to write.
-`--alternate-name` writes `alternate:name`; when omitted, it defaults to the
-alternate key.
-
----
-
-### `stacpkg items enrich --asset-lock PATH`
-
-**Description:** Write asset lock facts into items.
-
-| Argument or option | Required | Default | Description |
-| --- | --- | --- | --- |
-| `--asset-lock PATH` | Yes | - | Asset-lock Arrow IPC stream path. |
-| `--alternate-key KEY` | No | None | Alternate asset map key to write when adding reconstructed lock hrefs. |
-
-Read items metadata and an asset-lock Arrow IPC path, then write asset lock facts
-back into STAC assets as File Info fields and, optionally, Alternate Assets
-hrefs.
-
-```bash
-stacpkg items from-parquet source.items.parquet \
+stacpkg items from-parquet items.parquet \
   | stacpkg items enrich \
-      --asset-lock <(stacpkg asset-lock from-parquet asset-lock.parquet) \
-      --alternate-key mirror \
-  | stacpkg items to-parquet enriched.items.parquet
+      --asset-lock <(stacpkg asset-lock from-parquet assets.lock.parquet) \
+  | stacpkg items to-parquet enriched.parquet
 ```
 
-When alternate hrefs are a deterministic mapping of existing asset lock hrefs,
-materialize that mapped asset lock first with `asset-lock relocate --dry-run`,
-then enrich items from the planned lock:
+## Source and checksum options
 
-```bash
-stacpkg asset-lock from-parquet source.assets.lock.parquet \
-  | stacpkg asset-lock relocate \
-      --dry-run \
-      --source-prefix https://example.com/source/ \
-      --store-type s3 \
-      --store-container bucket \
-      --key source/ \
-      --layout source-key \
-  | stacpkg asset-lock to-parquet s3.assets.lock.parquet
+`relocate`, `build`, and `asset-lock derive` accept:
 
-stacpkg items from-parquet source.items.parquet \
-  | stacpkg items enrich \
-      --asset-lock <(stacpkg asset-lock from-parquet s3.assets.lock.parquet) \
-      --alternate-key s3 \
-  | stacpkg items to-parquet enriched.items.parquet
-```
+| Option | Default | Use |
+| --- | --- | --- |
+| `--source-base URI` | Source context or Item self link | Resolve relative hrefs. A directory URI must end in `/`. |
+| `--source-alternate KEY` | Primary href | Use this alternate for every selected asset. Missing alternates fail. |
 
-Enrichment writes `asset.alternate[KEY].href` from the href reconstructed from
-the supplied asset-lock row. Use `asset-lock relocate --dry-run` when the lock
-needs to describe alternate access paths without copying bytes.
+An explicit base takes priority, followed by an Item self link, then the input
+document path. Use runtime credentials
+for private stores. Saved hrefs and endpoints must not contain credentials or
+temporary signed grants.
 
-## Asset-Lock Commands
+`build`, `asset-lock derive`, `asset-lock validate`, and `asset-lock relocate`
+accept `--checksum METHOD`, defaulting to `metadata`. Package `validate` defaults
+to `calculate-if-needed`. Package `relocate` always hashes and checks the copy.
 
-### `stacpkg asset-lock derive`
+Choose `metadata`, `use-etag`, `calculate-if-needed`, or `calculate-always`.
+See [Asset lock](asset-lock.md#checksum-methods) for their behavior.
 
-**Description:** Derive asset lock rows from items streams.
+## Storage credentials
 
-| Argument or option | Required | Default | Description |
-| --- | --- | --- | --- |
-| `--probe-metadata`, `--no-probe-metadata` | No | `true` | Query referenced objects for current metadata while deriving rows. |
-| `--item-ids ITEM_ID` | No | All item ids | Item id to keep; repeat for multiple item ids. |
-| `--providers PROVIDER` | No | All providers | Provider name to keep; repeat for multiple provider names. |
-| `--asset-keys ASSET_KEY` | No | All non-metadata asset keys | Asset key to keep; repeat for multiple asset keys. |
-| `--include-metadata-assets` | No | `false` | Include assets whose asset key is `metadata`. |
-| `--keep-going` | No | `false` | Keep rows after recoverable metadata errors. |
-| `--max-workers WORKERS` | No | `4` | Maximum concurrent object metadata requests. |
+Source locations come from the Item assets, or from `--source-alternate`.
+`--target` sets the destination for copied assets. Each store uses its own
+runtime credentials. Local files use filesystem permissions.
 
-Emit one asset lock row per locked STAC asset. By default,
-`asset-lock derive` records structured locations plus current object metadata
-facts such as `size_bytes`, `etag`, and `last_modified` when the backend reports
-them. It skips assets whose key is `metadata`.
+For S3, the storage library reads `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+and optional `AWS_SESSION_TOKEN`. Use per-bucket environment variables when
+the stores need different credentials:
 
-```bash
-stacpkg items from-json selection.itemcollection.json \
-  | stacpkg items promote-alternate --alternate-key s3 \
-  | stacpkg asset-lock derive \
-  | stacpkg asset-lock validate
-```
+| Setting | Example for `source-bucket` |
+| --- | --- |
+| Access key | `STACPKG_S3_ACCESS_KEY_ID_SOURCE_BUCKET` |
+| Secret key | `STACPKG_S3_SECRET_ACCESS_KEY_SOURCE_BUCKET` |
+| Session token, if needed | `STACPKG_S3_SESSION_TOKEN_SOURCE_BUCKET` |
+| Region | `STACPKG_S3_REGION_SOURCE_BUCKET` |
+| Service endpoint | `STACPKG_S3_ENDPOINT_SOURCE_BUCKET` |
 
-Use `--no-probe-metadata` for a fast or offline derivation that only reuses
-facts already present in STAC item metadata, such as `file:size`. Use
-`--item-ids`, `--providers`, and `--asset-keys` to limit rows. Use
-`--include-metadata-assets` to include `metadata` assets; an explicit
-`--asset-keys metadata` filter also includes them.
+Replace `SOURCE_BUCKET` with the bucket name in uppercase, with each group
+of punctuation replaced by an underscore. For `target-bucket`, use
+`TARGET_BUCKET`. These settings apply by bucket name, on either side of a
+copy. Set both the access key and secret key when using per-bucket keys.
 
----
+An endpoint stored with an asset takes priority over runtime endpoint
+settings. `--target-endpoint-url` sets the target endpoint. Without a
+per-bucket endpoint, `AWS_ENDPOINT_URL` or `AWS_ENDPOINT` can set a shared
+endpoint for S3-compatible storage.
 
-### `stacpkg asset-lock from-parquet INPUT_FILE`
+Relocation needs source read access and target read and write access.
+Credentials are not stored in the package or passed as CLI options.
 
-**Description:** Read asset-lock Parquet as Arrow IPC.
+## Package commands
 
-| Argument or option | Required | Default | Description |
-| --- | --- | --- | --- |
-| `INPUT_FILE` | Yes | - | Asset-lock Parquet input path. |
-| `--batch-size ROWS` | No | `64000` | Maximum rows per IPC batch while reading Parquet. |
+### `relocate OUTPUT_DIR --target URI`
 
-Read an asset-lock Parquet file and write an asset-lock Arrow IPC stream.
+Read Items, copy selected assets to the target, and write a package after all
+copies pass. The output directory must not exist. A failed run can leave target
+objects. Local targets must be outside the package directory; use
+`build --include-assets` to put bytes inside it.
 
-```bash
-stacpkg asset-lock from-parquet source.assets.lock.parquet
-```
+| Option | Default | Use |
+| --- | --- | --- |
+| `--target URI` | Required | Local directory or object-store prefix. |
+| `--target-endpoint-url URL` | Runtime settings | Destination object-store endpoint. |
+| `--asset-keys KEY` | All except `metadata` | Repeat to select keys. Other assets leave the output selection. |
+| `--include-metadata-assets` | Off | Also copy the `metadata` asset key. |
+| `--collection PATH` | Embedded documents | Repeat to supply Collection JSON. |
+| `--overwrite` | Off | Permit replacement of destination objects. |
 
-The command iterates Parquet `RecordBatch` values rather than loading the whole
-file. Use `--batch-size` to tune the maximum rows per IPC batch while reading
-the Parquet file.
+Source options are listed above; transfer settings are below. The output is a
+JSON summary. Library method: `stacpkg.workflows.relocate_package`.
 
----
+### `validate PACKAGE`
 
-### `stacpkg asset-lock to-parquet OUTPUT_FILE`
+Check assets against Item and lock facts. Print JSON Lines results and a final
+summary. Save the lock atomically only after all required assets pass. Missing
+or extra rows, duplicate identities, conflicting facts, or changed assets fail
+the check. Failure returns a non-zero exit code and keeps the prior lock.
 
-**Description:** Write asset-lock streams as Parquet.
+Options: `--checksum METHOD` (default `calculate-if-needed`) and
+`--max-workers COUNT` (default `4`). The [Asset lock reference](asset-lock.md#validation)
+defines report fields. Library method: `stacpkg.workflows.validate_package`.
+Consume its iterator to completion to save the lock.
 
-| Argument or option | Required | Default | Description |
-| --- | --- | --- | --- |
-| `OUTPUT_FILE` | Yes | - | Asset-lock Parquet output path. |
+### `build OUTPUT_DIR`
 
-Read an asset-lock Arrow IPC stream and write an asset-lock Parquet file. This
-adapter preserves incoming IPC batches and does not first materialize the full
-asset-lock stream as an Arrow table.
+Read Items and write a [package directory](../architecture/0001-package-and-pipelines.md).
+Assets stay at their current locations unless included.
+The output directory must not exist. Build publishes it after the package is
+complete. Included files must have distinct names and must not replace the
+tables or copied assets.
 
-```bash
-stacpkg items from-parquet source.items.parquet \
-  | stacpkg asset-lock derive \
-  | stacpkg asset-lock to-parquet source.assets.lock.parquet
-```
+| Option | Default | Use |
+| --- | --- | --- |
+| `--asset-lock PATH` | Derive from Items | Reuse an Arrow IPC lock. |
+| `--collection PATH` | Preserve embedded documents | Repeat to supply Collection JSON objects or arrays. |
+| `--includes PATH` | None | Repeat to include files or directories. |
+| `--include-assets` | Off | Copy selected assets under `assets/` and set relative hrefs. |
+| `--include-metadata-assets` | Off | Include the `metadata` asset key when deriving the lock. |
+| `--item-ids ID` | All | Repeat to select Items. |
+| `--providers NAME` | All | Repeat to select providers. |
+| `--probe-metadata`, `--no-probe-metadata` | Probe | Query storage when deriving the lock. |
 
----
+Source and checksum options are listed above. Disabling the probe does not
+skip checks made by `--include-assets`. Explicit Collection documents replace
+embedded ones. Library method: `stacpkg.dataset.build_package`.
 
-### `stacpkg asset-lock validate`
+### `inspect PACKAGE`
 
-**Description:** Validate current assets against locked facts.
+Print file digests, Item and asset counts, and embedded Collection IDs.
+Use `--format {yaml,json,markdown,md}`; the default is `yaml`.
 
-| Argument or option | Required | Default | Description |
-| --- | --- | --- | --- |
-| `--item-ids ITEM_ID` | No | All item ids | Item id to validate; repeat for multiple item ids. |
-| `--asset-keys ASSET_KEY` | No | All asset keys | Asset key to validate; repeat for multiple asset keys. |
-| `--keep-going` | No | `false` | Emit invalid rows after recoverable validation errors. |
-| `--max-workers WORKERS` | No | `4` | Maximum concurrent object metadata requests. |
+### `push PACKAGE TARGET` and `pull SOURCE --output-dir PATH`
 
-Validate current assets against locked facts. Validation reads an asset-lock
-Arrow IPC stream and emits JSONL result rows with `valid` and `errors`.
+Transfer package files through an OCI registry. Pull requires a new output
+directory and checks each layer digest and size before publishing the directory.
+External assets stay at their recorded locations. Run `validate` after pulling
+to check the assets.
 
-```bash
-stacpkg asset-lock from-parquet source.assets.lock.parquet \
-  | stacpkg asset-lock validate
-```
+| Option | Default | Use |
+| --- | --- | --- |
+| `--auth-backend BACKEND` | `token` | oras authentication backend; use `basic` for HTTP Basic authentication. |
+| `--plain-http` | Off | Use HTTP instead of HTTPS. |
+| `--insecure` | Off | Disable TLS certificate checks. |
 
-The command exits with status `0` only when every emitted result is valid.
+Runtime authentication can use `ORAS_USER`, `ORAS_PASS`, or Docker authentication
+settings. Basic authentication does not require either transport flag.
+Library methods: `stacpkg.oci.push_package` and `stacpkg.oci.pull_package`.
+See [ADR-003](../architecture/0003-distribution-and-evidence.md) for artifact files.
 
----
+## Item tables
 
-### `stacpkg asset-lock relocate`
+All commands below start with `stacpkg items`.
 
-**Description:** Plan or relocate asset bytes into lock locations.
+| Command | Input | Output |
+| --- | --- | --- |
+| `from-json [FILE]` | Item or ItemCollection JSON; stdin if omitted. | Items Arrow stream. |
+| `from-ndjson [FILE]` | One Item JSON per line; stdin if omitted. | Items Arrow stream. |
+| `from-parquet FILE` | Local STAC GeoParquet. | Items Arrow stream. |
+| `to-parquet FILE` | Items Arrow stream. | STAC GeoParquet file. |
 
-| Argument or option | Required | Default | Description |
-| --- | --- | --- | --- |
-| `--destination-lock PATH` | Destination option | - | Destination asset-lock Parquet path. Mutually exclusive with `--store-type`. |
-| `--store-type {file,s3,gs,az,http,https}` | Destination option | - | Destination obstore storage type. Mutually exclusive with `--destination-lock`. |
-| `--store-container VALUE` | When needed | None | Destination bucket, container, or HTTP origin. Required for `s3`, `gs`, `az`, `http`, and `https`. |
-| `--store-endpoint-url URL` | No | None | Destination object-store endpoint URL. |
-| `--key PREFIX` | When needed | Empty prefix | Destination key or path prefix. Required for `file`. |
-| `--source-prefix PREFIX` | No | All source hrefs | Only map asset hrefs at or below this source href prefix. |
-| `--layout {item-asset,source-key}` | No | `item-asset` | Destination key layout for relocated rows. |
-| `--dry-run` | No | `false` | Write planned destination lock rows without copying asset bytes. |
-| `--overwrite`, `--no-overwrite` | No | `--overwrite` | Overwrite existing destination objects. |
-| `--keep-going` | No | `false` | Keep rows after recoverable relocation errors. |
-| `--max-workers WORKERS` | No | `4` | Maximum concurrent relocation tasks. |
-| `--memory-limit-bytes SIZE` | No | `2147483648` | Maximum reserved streaming relocation memory, e.g. `2GiB` or `512MiB`. |
-| `--chunk-size-bytes SIZE` | No | `8388608` | Streaming relocation chunk size, e.g. `8MiB`. |
-| `--put-max-concurrency COUNT` | No | `1` | Maximum concurrent multipart puts per relocation task. |
+The three readers accept repeatable `--collections ID`, `--providers NAME`,
+and `--item-ids ID` filters. Repeated values within a filter are alternatives;
+different filters must all match. JSON input accepts Items and ItemCollections.
+Relative hrefs use the input document path or an absolute Item self link.
 
-Relocate reads source asset-lock rows from stdin, creates or reads destination
-rows, and writes the destination lock as an Arrow IPC stream. By default it also
-transfers bytes and records destination object metadata. With `--dry-run`, it
-writes the planned destination rows without copying bytes or proving that the
-destination objects exist. Rows are matched by `item_id` and `asset_key`.
+NDJSON and Parquet readers accept `--batch-size ROWS`, default `64000`.
+The first NDJSON batch fixes the Arrow schema. Later batches can omit fields;
+new fields or changed types cause an error. Use JSON input for varied fields.
+The writer accepts repeatable `--collection PATH` inputs and preserves
+[Collection metadata](items.md#collection-metadata) already in the stream.
 
-```bash
-stacpkg asset-lock from-parquet source.assets.lock.parquet \
-  | stacpkg asset-lock relocate \
-      --store-type s3 \
-      --store-container recipient-products \
-      --key products/ \
-  | stacpkg asset-lock to-parquet asset-lock.parquet
-```
+### Asset hrefs and file facts
 
-Use `--destination-lock` when destination asset-lock rows have already been
-prepared, reviewed, or supplied by another party:
+These commands read and write Items Arrow streams.
 
-```bash
-stacpkg asset-lock from-parquet source.assets.lock.parquet \
-  | stacpkg asset-lock relocate \
-      --destination-lock reviewed-destination.asset-lock.parquet \
-  | stacpkg asset-lock to-parquet asset-lock.parquet
-```
+| Command | Required options | Behavior |
+| --- | --- | --- |
+| `promote-alternate` | `--alternate-key KEY` | Make an alternate the primary href. |
+| `remove-alternate` | `--alternate-key KEY` | Remove that alternate and keep the primary. |
+| `add-alternate` | `--asset-lock PATH --alternate-key KEY` | Add hrefs reconstructed from the lock. |
+| `enrich` | `--asset-lock PATH` | Write lock size and checksum facts as File Info fields. |
 
-With `--store-type`, the command first maps destination locations in memory.
-`--layout item-asset` writes keys from item and asset identifiers; `--layout
-source-key` keeps the source object key shape under the destination prefix.
-`--source-prefix` leaves non-matching rows unchanged.
+`promote-alternate`, `remove-alternate`, and `add-alternate` also accept `--key`
+as an alias for `--alternate-key`.
 
-Use `--dry-run` when the destination rows describe an equivalent access path
-rather than a copy operation. For example, public HTTPS OpenAerialMap assets can
-be projected to their equivalent S3 locations and then used as STAC alternates:
+Promotion accepts `--mode {replace,switch}`, default `replace`. In `switch`
+mode, the old primary becomes the selected alternate. Set its name with
+`--switched-alternate-name NAME`, default `original`. `--drop-alternates` removes
+the alternate map after replacement and cannot be used with `switch`.
 
-```bash
-stacpkg asset-lock from-parquet source.assets.lock.parquet \
-  | stacpkg asset-lock relocate \
-      --dry-run \
-      --source-prefix https://oin-hotosm-temp.s3.amazonaws.com/ \
-      --store-type s3 \
-      --store-container oin-hotosm-temp \
-      --store-endpoint-url https://s3.amazonaws.com \
-      --layout source-key \
-  | stacpkg asset-lock to-parquet s3.assets.lock.parquet
-```
+`add-alternate` accepts `--alternate-name NAME` (alias `--name`), defaulting to
+the alternate key. `enrich --alternate-key KEY` also adds a reconstructed href
+there. Enrichment removes a source checksum if the lock has no checksum fact.
+
+## Collection documents
+
+`stacpkg collections extract FILE [--output PATH]` reads embedded Collection
+documents and writes a JSON array sorted by ID. Output goes to stdout when
+`--output` is omitted. Stored asset hrefs are preserved.
+See [Items](items.md#collection-extraction) for the metadata format.
+
+## Asset-lock tables
+
+All commands below start with `stacpkg asset-lock`.
+
+| Command | Input | Output |
+| --- | --- | --- |
+| `derive` | Items Arrow stream. | Asset-lock Arrow stream. |
+| `from-parquet FILE` | Asset-lock Parquet. | Asset-lock Arrow stream. |
+| `to-parquet FILE` | Asset-lock Arrow stream. | Asset-lock Parquet. |
+| `validate` | Asset-lock Arrow stream. | JSON Lines results. |
+| `relocate` | Source asset-lock Arrow stream. | Destination asset-lock Arrow stream. |
+
+`from-parquet` accepts `--batch-size ROWS`, default `64000`.
+
+### `derive`
+
+Derive locations and query current file facts. Options:
+
+- `--item-ids ID`, `--providers NAME`, and `--asset-keys KEY`: repeat to filter.
+- `--include-metadata-assets`: include the `metadata` asset key; it is skipped by default.
+- `--probe-metadata` or `--no-probe-metadata`: probing is on by default.
+- `--keep-going`: retain rows after recoverable metadata errors.
+- `--max-workers COUNT`: default `4`.
+
+Source and checksum options are listed above. Offline derivation records
+locations and known size facts.
+An explicit `--asset-keys metadata` also includes metadata assets.
+
+### `validate`
+
+Compare current assets with locked facts. Options: repeatable `--item-ids ID`
+and `--asset-keys KEY`, `--checksum METHOD` (default `metadata`), `--max-workers`
+(default `4`), and `--keep-going`. Exit status is zero only when every emitted
+result is valid. This command does not rewrite a saved lock.
+
+### `relocate`
+
+Choose a reviewed destination lock with `--destination-lock PATH` (Parquet),
+or describe a destination with `--store-type {file,s3,gs,az,http,https}`.
+These choices are mutually exclusive.
+
+| Option | Default | Use |
+| --- | --- | --- |
+| `--store-container VALUE` | None | Bucket, container, or HTTP origin; required except for files. |
+| `--store-endpoint-url URL` | Runtime settings | Destination object-store endpoint. |
+| `--key PREFIX` | Empty | Destination prefix; required for files. |
+| `--source-prefix URI` | All | Only map locations at or below this prefix. |
+| `--layout {item-asset,source-key}` | `item-asset` | Use Item/asset names or keep source object key paths. |
+| `--dry-run` | Off | Write destination rows without copying bytes or checking target existence. |
+| `--overwrite`, `--no-overwrite` | Overwrite | Control replacement of destination objects. |
+| `--keep-going` | Off | Retain rows after recoverable copy errors. |
+
+Checksum options are listed above. Rows match by `item_id` and `asset_key`.
+A destination lock can describe an alternate access route.
+
+## Transfer settings
+
+Package `relocate` and `asset-lock relocate` accept:
+
+| Option | Default | Use |
+| --- | --- | --- |
+| `--max-workers COUNT` | `4` | Maximum copy tasks. |
+| `--memory-limit-bytes SIZE` | `2GiB` | Reserved transfer buffer budget. |
+| `--chunk-size-bytes SIZE` | `8MiB` | Streaming chunk size. |
+| `--put-max-concurrency COUNT` | `1` | Multipart puts per task. |
+
+Sizes accept bytes or units such as `128MiB`.

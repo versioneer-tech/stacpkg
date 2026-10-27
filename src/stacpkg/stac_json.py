@@ -13,6 +13,7 @@ import pyarrow as pa
 from stacpkg.arrow_io import DEFAULT_STREAM_BATCH_SIZE, align_table_to_schema
 from stacpkg.geoparquet import items_table_to_geoparquet_table
 from stacpkg.schemas import items_schema
+from stacpkg.sources import resolve_item_assets
 
 
 def _compact_json(value: Any) -> str:
@@ -116,6 +117,24 @@ def read_stac_ndjson_document(
     return items_to_table(list(_ndjson_items(source)), source_href=source_href)
 
 
+def _check_stream_fields(actual: pa.DataType, expected: pa.DataType, path: str = "") -> None:
+    if pa.types.is_null(actual):
+        return
+    if pa.types.is_struct(actual) and pa.types.is_struct(expected):
+        for field in actual:
+            name = f"{path}.{field.name}" if path else field.name
+            index = expected.get_field_index(field.name)
+            if index == -1:
+                raise ValueError(
+                    f"NDJSON schema changed at {name}; use JSON input for varied fields"
+                )
+            _check_stream_fields(field.type, expected[index].type, name)
+    elif pa.types.is_list(actual) and pa.types.is_list(expected):
+        _check_stream_fields(actual.value_type, expected.value_type, path)
+    elif actual != expected:
+        raise ValueError(f"NDJSON schema changed at {path}; use JSON input for varied fields")
+
+
 def write_stac_ndjson_stream(
     source: TextIO,
     sink: BinaryIO,
@@ -132,13 +151,14 @@ def write_stac_ndjson_stream(
             batch_size=batch_size,
             source_href=source_href,
         ):
-            table = items_table_to_geoparquet_table(compact)
+            table = items_table_to_geoparquet_table(resolve_item_assets(compact))
             if transform is not None:
                 table = transform(table)
             if writer is None:
                 output_schema = table.schema
                 writer = pa.ipc.new_stream(sink, output_schema)
             assert output_schema is not None
+            _check_stream_fields(pa.struct(table.schema), pa.struct(output_schema))
             writer.write_table(align_table_to_schema(table, output_schema))
 
         if writer is None:

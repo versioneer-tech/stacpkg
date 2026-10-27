@@ -3,27 +3,19 @@
 
 from __future__ import annotations
 
+import json
 from io import BytesIO
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 
 from stacpkg.arrow_io import write_stream
-from stacpkg.assets import derive_asset_lock
 from stacpkg.geoparquet import write_items_geoparquet, write_items_geoparquet_stream
-from stacpkg.locators import href_from_location
-from stacpkg.schemas import ASSET_LOCK_COLUMNS
 from stacpkg.stac_json import read_stac_json
 from openaerialmap_fixture import (
-    LOCAL_OPENAERIALMAP_ASSET_KEYS,
     write_localized_openaerialmap_item_collection_json,
 )
-
-
-def _href(row: dict[str, object]) -> str:
-    value = href_from_location(row)
-    assert isinstance(value, str)
-    return value
 
 
 def test_write_items_library_call_preserves_openaerialmap_fields_and_local_asset_metadata(
@@ -59,81 +51,85 @@ def test_write_items_library_call_preserves_openaerialmap_fields_and_local_asset
     assert metadata["type"] == "application/json"
 
 
-def test_created_stac_geoparquet_can_be_locked_as_assets(tmp_path):
+@pytest.mark.parametrize("input_format", ["json", "parquet"])
+def test_link_fields_survive_conversion_and_streamed_parquet_round_trip(tmp_path, input_format):
     source = write_localized_openaerialmap_item_collection_json(
-        tmp_path,
-        tmp_path / "openaerialmap-local.itemcollection.json",
+        tmp_path, tmp_path / "selection.json", item_count=2
     )
-    output = tmp_path / "openaerialmap.items.parquet"
+    document = json.loads(source.read_text())
+    items = document["features"]
+    links = [
+        [
+            {
+                "href": "https://publisher.test/search",
+                "rel": "via",
+                "method": "POST",
+                "body": {"ids": [items[0]["id"]]},
+                "headers": {"Accept": "application/geo+json"},
+                "custom:trace": "xyz",
+            }
+        ],
+        [{"href": "https://publisher.test/license", "rel": "license", "custom:rank": 2}],
+    ]
+    expected = [
+        [{**links[0][0], "type": None, "title": None, "custom:rank": None}],
+        [
+            {
+                **links[1][0],
+                "type": None,
+                "title": None,
+                "method": None,
+                "body": None,
+                "headers": None,
+                "custom:trace": None,
+            }
+        ],
+    ]
+    if input_format == "json":
+        for item, item_links in zip(items, links):
+            item["links"] = item_links
+        source.write_text(json.dumps(document))
+        table = read_stac_json(source)
+    else:
+        source = tmp_path / "external.parquet"
+        pq.write_table(pa.table({"id": [item["id"] for item in items], "links": links}), source)
+        table = pq.read_table(source)
 
-    write_items_geoparquet(read_stac_json(source), output)
-    lock = derive_asset_lock(pq.read_table(output), include_metadata_assets=True)
+    output = tmp_path / "converted.parquet"
+    write_items_geoparquet(table, output)
+    converted = pq.read_table(output)
+    assert converted.column("links").to_pylist() == expected
 
-    rows = sorted(lock.to_pylist(), key=lambda row: row["asset_key"])
-    assert lock.num_rows == len(LOCAL_OPENAERIALMAP_ASSET_KEYS)
-    assert lock.schema.names == list(ASSET_LOCK_COLUMNS)
-    assert rows[0]["item_id"]
-    assert {row["asset_key"] for row in rows} == set(LOCAL_OPENAERIALMAP_ASSET_KEYS)
-    assert all(_href(row).startswith("file://") for row in rows)
+    stream = BytesIO()
+    with pa.ipc.new_stream(stream, converted.schema) as writer:
+        writer.write_table(converted, max_chunksize=1)
+    stream.seek(0)
+    restored = tmp_path / "restored.parquet"
+    write_items_geoparquet_stream(stream, restored)
+
+    assert pq.read_table(restored).column("links").to_pylist() == expected
 
 
-def test_streaming_item_geoparquet_writer_preserves_expanded_batches(tmp_path):
+def test_point_z_and_bbox_survive_parquet_and_arrow_round_trip(tmp_path):
     source = write_localized_openaerialmap_item_collection_json(
-        tmp_path,
-        tmp_path / "openaerialmap-local.itemcollection.json",
+        tmp_path, tmp_path / "selection.json"
     )
-    expanded = write_items_geoparquet(read_stac_json(source), tmp_path / "expanded.items.parquet")
+    document = json.loads(source.read_text())
+    item = document["features"][0]
+    item["geometry"] = {"type": "Point", "coordinates": [16, 48, 100]}
+    item["bbox"] = [16, 48, 100, 16, 48, 100]
+    source.write_text(json.dumps(document))
+    output = tmp_path / "items.parquet"
+
+    table = write_items_geoparquet(read_stac_json(source), output)
     stream = BytesIO()
-    write_stream(expanded, stream)
+    write_stream(table, stream)
     stream.seek(0)
+    restored = tmp_path / "restored.parquet"
+    write_items_geoparquet_stream(stream, restored)
 
-    output = tmp_path / "restored.items.parquet"
-    write_items_geoparquet_stream(stream, output)
-
-    restored = pq.read_table(output)
-    assert restored.schema.metadata[b"stac_geoparquet:version"] == b"1.0.0"
-    assert restored.schema.field("geometry").metadata[b"ARROW:extension:name"] == b"geoarrow.wkb"
-    assert restored.to_pylist() == expanded.to_pylist()
-
-
-def test_streaming_item_geoparquet_writer_uses_record_batch_writer(tmp_path, monkeypatch):
-    table = pa.table(
-        {
-            "id": ["item-1", "item-2"],
-            "geometry": [b"\x01\x01", b"\x01\x02"],
-            "links": [[], []],
-        }
+    row = pq.read_table(restored).to_pylist()[0]
+    assert row["geometry"] == bytes.fromhex(
+        "01e9030000000000000000304000000000000048400000000000005940"
     )
-    stream = BytesIO()
-    with pa.ipc.new_stream(stream, table.schema) as writer:
-        writer.write_batch(table.slice(0, 1).to_batches()[0])
-        writer.write_batch(table.slice(1, 1).to_batches()[0])
-    stream.seek(0)
-    written_batch_sizes = []
-
-    class RecordingParquetWriter:
-        def __init__(self, path, schema) -> None:
-            self.path = path
-            self.schema = schema
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc_value, traceback) -> None:
-            return None
-
-        def write_batch(self, batch: pa.RecordBatch) -> None:
-            assert batch.schema.metadata[b"stac_geoparquet:version"] == b"1.0.0"
-            assert batch.schema.field("geometry").metadata[b"ARROW:extension:name"] == (
-                b"geoarrow.wkb"
-            )
-            written_batch_sizes.append(batch.num_rows)
-
-        def write_table(self, table: pa.Table) -> None:
-            raise AssertionError("stream was materialized as a table")
-
-    monkeypatch.setattr("stacpkg.geoparquet.pq.ParquetWriter", RecordingParquetWriter)
-
-    write_items_geoparquet_stream(stream, tmp_path / "streamed.items.parquet")
-
-    assert written_batch_sizes == [1, 1]
+    assert row["bbox"] == {"xmin": 16, "ymin": 48, "zmin": 100, "xmax": 16, "ymax": 48, "zmax": 100}

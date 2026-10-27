@@ -7,6 +7,7 @@ import json
 import logging
 from pathlib import Path
 from typing import BinaryIO
+from collections.abc import Mapping
 from urllib.parse import urlparse
 
 import pyarrow as pa
@@ -14,6 +15,12 @@ import pyarrow.parquet as pq
 
 from stacpkg.arrow_io import align_record_batch_to_schema
 from stacpkg.items import filter_items
+from stacpkg.checksums import (
+    file_checksum_algorithm,
+    normalize_checksum_strategy,
+    normalize_file_checksum,
+)
+from stacpkg.sources import check_public_href, resolve_item_assets
 from stacpkg.locators import (
     OBSTORE_STORE_TYPES,
     child_location,
@@ -92,14 +99,19 @@ def _compact_asset_lock_row(source: dict[str, object]) -> dict[str, object]:
             continue
         value = source.get(column)
         if value is not None:
+            if column == "file_checksum":
+                value = normalize_file_checksum(value)
+                if value is None:
+                    raise ValueError("file_checksum must be a supported full-object Multihash")
             row[column] = value
     return row
 
 
 def _item_assets(item: dict[str, object]) -> dict[str, dict[str, object]]:
     if "assets_json" in item:
-        return json.loads(str(item.get("assets_json") or "{}"))
-    assets = item.get("assets")
+        assets = json.loads(str(item.get("assets_json") or "{}"))
+    else:
+        assets = item.get("assets")
     if isinstance(assets, dict):
         return {
             key: asset
@@ -107,6 +119,66 @@ def _item_assets(item: dict[str, object]) -> dict[str, dict[str, object]]:
             if isinstance(asset, dict) and asset.get("href")
         }
     return {}
+
+
+def _asset_index(rows: list[dict]) -> dict[tuple, dict]:
+    index = {}
+    for row in rows:
+        identity = (row.get("item_id"), row.get("asset_key"))
+        if not all(identity) or identity in index:
+            raise ValueError("asset identities must be present and unique")
+        index[identity] = row
+    return index
+
+
+def _item_index(items: pa.Table) -> dict[tuple, dict]:
+    rows, item_ids = [], set()
+    for item in items.to_pylist():
+        item_id = item.get("id")
+        if not item_id or item_id in item_ids:
+            raise ValueError("Item ids must be present and unique in a package")
+        item_ids.add(item_id)
+        for key, asset in _item_assets(item).items():
+            rows.append({**asset, "item_id": item_id, "asset_key": key})
+    return _asset_index(rows)
+
+
+def _declared_checksum(asset: Mapping) -> str | None:
+    value = asset.get("file:checksum")
+    if value is None:
+        return None
+    checksum = normalize_file_checksum(value)
+    if checksum is None:
+        raise ValueError("STAC file:checksum must be a supported full-object Multihash")
+    return checksum
+
+
+def _check_destinations(assets: pa.Table) -> None:
+    locations = [
+        (href_from_location(row), row.get("store_endpoint_url")) for row in assets.to_pylist()
+    ]
+    if len(locations) != len(set(locations)):
+        raise ValueError("asset names map to the same destination")
+
+
+def _check_source_checksums(items: pa.Table, assets: pa.Table, *, calculate: bool) -> None:
+    from stacpkg.object_store import validate_assets
+
+    declared = _item_index(items)
+    additional = []
+    for row in assets.to_pylist():
+        expected = _declared_checksum(declared[(row["item_id"], row["asset_key"])])
+        observed = row.get("file_checksum")
+        if not expected or not observed or expected == observed:
+            continue
+        if file_checksum_algorithm(expected) == file_checksum_algorithm(observed):
+            raise ValueError("source checksum mismatch")
+        if calculate:
+            additional.append({**row, "file_checksum": expected})
+    if additional:
+        for result in validate_assets(asset_lock_table(additional), checksum="calculate-if-needed"):
+            if not result["valid"]:
+                raise ValueError("source checksum mismatch")
 
 
 def _size(value: object) -> int | None:
@@ -124,7 +196,7 @@ def _endpoint_url(value: object) -> str | None:
     endpoint = value.strip().rstrip("/")
     if not urlparse(endpoint).scheme:
         endpoint = f"https://{endpoint}"
-    return endpoint
+    return check_public_href(endpoint)
 
 
 def derive_asset_lock(
@@ -137,9 +209,20 @@ def derive_asset_lock(
     include_metadata_assets: bool = False,
     keep_going: bool = False,
     max_workers: int | None = None,
+    checksum: str = "metadata",
+    source_base: str | Path | None = None,
+    source_alternate: str | None = None,
 ) -> pa.Table:
+    checksum = normalize_checksum_strategy(checksum)
     if item_ids or providers:
         items = filter_items(items, item_ids=item_ids, providers=providers)
+    items = resolve_item_assets(
+        items,
+        source_base=source_base,
+        source_alternate=source_alternate,
+        asset_keys=asset_keys,
+        include_metadata_assets=include_metadata_assets,
+    )
 
     rows: list[dict[str, object]] = []
     for item in items.to_pylist():
@@ -166,16 +249,14 @@ def derive_asset_lock(
         return assets
     from stacpkg.object_store import stat_assets
 
+    options = {"keep_going": keep_going}
     if max_workers is not None:
-        return stat_assets(
-            assets,
-            keep_going=keep_going,
-            max_workers=max_workers,
-        )
-    return stat_assets(
-        assets,
-        keep_going=keep_going,
-    )
+        options["max_workers"] = max_workers
+    if checksum != "metadata":
+        options["checksum"] = checksum
+    observed = stat_assets(assets, **options)
+    _check_source_checksums(items, observed, calculate=checksum.startswith("calculate-"))
+    return observed
 
 
 def map_asset_locations(
@@ -186,7 +267,10 @@ def map_asset_locations(
     layout: str = "item-asset",
     target_endpoint_url: str | None = None,
 ) -> pa.Table:
+    check_public_href(target)
     target_location = location_from_href(target)
+    if target_location.get("store_type") == "file":
+        target_location["key"] = str(Path(str(target_location["key"])).resolve())
     target_endpoint_url = _endpoint_url(target_endpoint_url)
     if target_endpoint_url is not None:
         target_location["store_endpoint_url"] = target_endpoint_url
@@ -264,6 +348,7 @@ def _map_asset_locations_to_location(
                 "store_endpoint_url",
                 "key",
                 "size_bytes",
+                "file_checksum",
             }:
                 continue
             row.pop(field, None)

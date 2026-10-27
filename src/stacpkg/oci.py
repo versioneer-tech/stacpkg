@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import mimetypes
 import shutil
 import tempfile
@@ -13,7 +12,7 @@ from pathlib import Path, PurePosixPath
 
 from oras.client import OrasClient
 
-from stacpkg.dataset import ASSET_LOCK_PACKAGE_PATH, ITEMS_PACKAGE_PATH
+from stacpkg.dataset import ASSET_LOCK_PACKAGE_PATH, ITEMS_PACKAGE_PATH, _sha256
 
 ARTIFACT_TYPE = "application/vnd.stacpkg.package.v1+json"
 OCI_MANIFEST_MEDIA_TYPE = "application/vnd.oci.image.manifest.v1+json"
@@ -96,6 +95,8 @@ def _extract_zip(archive_path: Path, output_dir: Path) -> None:
             if member.is_dir():
                 target.mkdir(parents=True, exist_ok=True)
                 continue
+            if target.exists():
+                raise RuntimeError(f"duplicate package path: {member.filename}")
             target.parent.mkdir(parents=True, exist_ok=True)
             with archive.open(member) as source, target.open("wb") as destination:
                 shutil.copyfileobj(source, destination)
@@ -117,8 +118,6 @@ def _package_layers(package_dir: Path, temp_dir: Path) -> list[_LayerFile]:
     for entry in sorted(package_dir.iterdir()):
         if entry.name in {ITEMS_PACKAGE_PATH, ASSET_LOCK_PACKAGE_PATH}:
             continue
-        if entry.name == "manifest.json":
-            continue
         relative_path = entry.relative_to(package_dir).as_posix()
         if entry.name == "assets" and entry.is_dir():
             for asset_path in sorted(child for child in entry.rglob("*") if child.is_file()):
@@ -138,14 +137,6 @@ def _package_layers(package_dir: Path, temp_dir: Path) -> list[_LayerFile]:
         if entry.is_file():
             layers.append(_LayerFile(entry, _media_type(entry), relative_path))
     return layers
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _layer_descriptor(layer: _LayerFile) -> dict[str, object]:
@@ -220,9 +211,13 @@ def pull_package(
     auth_backend: str = "token",
 ) -> None:
     output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="stacpkg-oci-pull-") as temp:
+    if output_dir.exists():
+        raise ValueError("pull output directory must not exist")
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="xyz-", dir=output_dir.parent) as temp:
         temp_dir = Path(temp)
+        package = temp_dir / "package"
+        package.mkdir()
         client = _oras_client(
             plain_http=plain_http,
             insecure=insecure,
@@ -234,28 +229,35 @@ def pull_package(
 
         for index, layer in enumerate(manifest.get("layers", [])):
             media_type = layer.get("mediaType")
-            annotations = layer.get("annotations") or {}
-            title = annotations.get(TITLE_ANNOTATION)
+            title = (layer.get("annotations") or {}).get(TITLE_ANNOTATION)
+            archive = media_type in {FILES_ZIP_MEDIA_TYPE, ASSET_ZIP_MEDIA_TYPE}
             if media_type == ITEMS_MEDIA_TYPE:
-                target_path = output_dir / ITEMS_PACKAGE_PATH
+                target_path = package / ITEMS_PACKAGE_PATH
             elif media_type == ASSET_LOCK_MEDIA_TYPE:
-                target_path = output_dir / ASSET_LOCK_PACKAGE_PATH
-            elif media_type in {FILES_ZIP_MEDIA_TYPE, ASSET_ZIP_MEDIA_TYPE}:
-                archive_path = temp_dir / f"layer-{index}.zip"
-                client.download_blob(container, layer["digest"], str(archive_path))
-                _extract_zip(archive_path, output_dir)
-                continue
-            elif media_type == ASSET_MEDIA_TYPE or title:
-                if not title:
-                    raise RuntimeError(f"OCI layer {index} is missing {TITLE_ANNOTATION}")
-                target_path = _safe_output_path(output_dir, title)
+                target_path = package / ASSET_LOCK_PACKAGE_PATH
+            elif archive:
+                target_path = None
+            elif title:
+                target_path = _safe_output_path(package, title)
             else:
-                raise RuntimeError(f"unsupported OCI package layer media type: {media_type}")
+                raise RuntimeError(f"unsupported OCI package layer: {media_type}")
 
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            client.download_blob(container, layer["digest"], str(target_path))
+            downloaded = temp_dir / f"layer-{index}"
+            client.download_blob(container, layer["digest"], str(downloaded))
+            if (
+                downloaded.stat().st_size != layer["size"]
+                or f"sha256:{_sha256(downloaded)}" != layer["digest"]
+            ):
+                raise RuntimeError(f"OCI layer digest or size mismatch: {title or index}")
+            if archive:
+                _extract_zip(downloaded, package)
+            else:
+                if target_path.exists():
+                    raise RuntimeError(f"duplicate package path: {title}")
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                downloaded.replace(target_path)
 
-    if not (output_dir / ITEMS_PACKAGE_PATH).exists():
-        raise RuntimeError(f"OCI artifact did not contain {ITEMS_PACKAGE_PATH}")
-    if not (output_dir / ASSET_LOCK_PACKAGE_PATH).exists():
-        raise RuntimeError(f"OCI artifact did not contain {ASSET_LOCK_PACKAGE_PATH}")
+        for name in (ITEMS_PACKAGE_PATH, ASSET_LOCK_PACKAGE_PATH):
+            if not (package / name).is_file():
+                raise RuntimeError(f"OCI artifact did not contain {name}")
+        package.rename(output_dir)

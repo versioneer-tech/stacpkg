@@ -24,6 +24,7 @@ items:
             app.kubernetes.io/name: registry
             app.kubernetes.io/part-of: stacpkg-tests
         spec:
+          automountServiceAccountToken: false
           containers:
             - name: registry
               image: registry:2
@@ -43,20 +44,11 @@ items:
                   port: registry
                 initialDelaySeconds: 3
                 periodSeconds: 5
-              livenessProbe:
-                tcpSocket:
-                  port: registry
-                initialDelaySeconds: 10
-                periodSeconds: 10
               volumeMounts:
-                - name: registry-data
-                  mountPath: /var/lib/registry
                 - name: registry-auth
                   mountPath: /auth
                   readOnly: true
           volumes:
-            - name: registry-data
-              emptyDir: {}
             - name: registry-auth
               secret:
                 secretName: registry-basic-auth

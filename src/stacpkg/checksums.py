@@ -124,6 +124,27 @@ def etag_to_file_checksum(value: object) -> str | None:
     return multihash_from_hex_digest("md5", text)
 
 
+def checksum_from_metadata(metadata: dict[str, object]) -> str | None:
+    """Read supported full-object checksum fields without promoting ETags."""
+    fields = {}
+    for key, value in metadata.items():
+        if isinstance(value, dict):
+            fields.update(value)
+        else:
+            fields[key] = value
+    fields = {re.sub(r"[^a-z0-9]", "", str(key).lower()): value for key, value in fields.items()}
+    kind = fields.get("checksumtype", fields.get("xamzchecksumtype"))
+    if kind != "FULL_OBJECT":
+        return None
+    for algorithm in ("sha256", "sha512", "sha1", "md5"):
+        value = fields.get(f"checksum{algorithm}", fields.get(f"xamzchecksum{algorithm}"))
+        if isinstance(value, str):
+            checksum = multihash_from_base64_digest(algorithm, value)
+            if checksum:
+                return checksum
+    return None
+
+
 def _parse_multihash(value: str) -> tuple[str, str] | None:
     if not _is_hex(value):
         return None

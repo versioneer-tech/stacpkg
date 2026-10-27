@@ -72,7 +72,7 @@ def _enriched_items_schema(schema: pa.Schema, *, alternate_key: str | None) -> p
     if not pa.types.is_struct(assets_field.type):
         return schema
 
-    extra_fields = [pa.field("file:size", pa.int64())]
+    extra_fields = [pa.field("file:size", pa.int64()), pa.field("file:checksum", pa.string())]
     if alternate_key:
         extra_fields.append(_alternate_field(alternate_key))
 
@@ -131,6 +131,10 @@ def _enrich_asset(
     used_alternate_extension = False
 
     enriched.pop("file:checksum", None)
+    checksum = lock.get("file_checksum")
+    if checksum:
+        enriched["file:checksum"] = checksum
+        used_file_extension = True
 
     size = lock.get("size_bytes")
     if size is not None:

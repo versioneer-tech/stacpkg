@@ -83,7 +83,9 @@ def parse_usecase_shell(path: Path) -> UsecaseSource:
             if events and isinstance(events[-1], Markdown) and events[-1].text:
                 events.append(Markdown(""))
             continue
-        if stripped.startswith("#!") or stripped == "set -euo pipefail":
+        if stripped.startswith(("#!", "# Copyright ", "# SPDX-License-Identifier:")) or (
+            stripped == "set -euo pipefail"
+        ):
             flush_command()
             continue
         if stripped.startswith("#"):
@@ -126,7 +128,7 @@ def parse_usecase_shell(path: Path) -> UsecaseSource:
     )
 
 
-def markdown_from_usecase(usecase: UsecaseSource) -> str:
+def markdown_from_usecase(usecase: UsecaseSource, *, output_path: Path | None = None) -> str:
     lines = [
         f"# {usecase.title}",
         "",
@@ -150,28 +152,17 @@ def markdown_from_usecase(usecase: UsecaseSource) -> str:
             continue
         lines.extend(["```bash", event.text, "```", ""])
     flush_markdown()
+    if output_path is not None and output_path.is_file():
+        outputs = json.loads(output_path.read_text(encoding="utf-8"))
+        commands = "\n\n".join(event.text for event in usecase.events if isinstance(event, Command))
+        if len(outputs) == 1 and outputs[0]["command"] == commands:
+            output = outputs[0]["stdout"].strip()
+            if output:
+                lines.extend(["## Output", "", "```text", output, "```", ""])
     return "\n".join(lines).rstrip() + "\n"
 
 
-def markdown_index_from_usecases(usecases: list[UsecaseSource]) -> str:
-    lines = [
-        "# Use Cases",
-        "",
-        f"<!-- Generated from `{_display_path(DEFAULT_SOURCE_DIR)}` by {GENERATOR_ID}; do not edit by hand. -->",
-        "",
-        "These pages are generated from shell sources in `docs/usecases`.",
-        "",
-    ]
-    if not usecases:
-        lines.extend(["No use case shell sources are available yet.", ""])
-        return "\n".join(lines)
-    for usecase in usecases:
-        lines.append(f"- [{usecase.title}]({usecase.slug}.md)")
-    lines.append("")
-    return "\n".join(lines)
-
-
-def python_test_from_usecase(usecase: UsecaseSource) -> str:
+def python_test_from_usecase(usecase: UsecaseSource, *, output_path: Path | None = None) -> str:
     if not usecase.generate_test:
         raise UnsupportedCommand(f"{_display_path(usecase.path)} is marked as docs-only")
     if not _has_test_assertion(usecase):
@@ -179,14 +170,16 @@ def python_test_from_usecase(usecase: UsecaseSource) -> str:
             f"{_display_path(usecase.path)} must include at least one # test-assert directive"
         )
 
-    body_lines = ["shell = UsecaseShell(tmp_path)"]
-    body_lines.extend(_setup_calls(usecase))
+    body_lines = ["shell = runtime.UsecaseShell(tmp_path)"]
+    body_lines.extend("runtime." + call for call in _setup_calls(usecase))
     shell_script = "\n\n".join(event.text for event in usecase.events if isinstance(event, Command))
     if shell_script:
         body_lines.extend(
             ["shell.run(", _indent(_python_multiline_string(shell_script), "    "), ")"]
         )
-    body_lines.extend(_assertion_calls(usecase))
+    body_lines.extend("runtime." + call for call in _assertion_calls(usecase))
+    if output_path is not None:
+        body_lines.append(f"shell.save_output(Path({str(output_path)!r}))")
     body = _indent("\n".join(body_lines), "    ")
 
     return (
@@ -196,29 +189,7 @@ def python_test_from_usecase(usecase: UsecaseSource) -> str:
         "from __future__ import annotations\n\n"
         "from pathlib import Path\n\n"
         "import pytest\n\n"
-        "from tests.usecases.runtime import (\n"
-        "    UsecaseShell,\n"
-        "    assert_asset_lock_keys,\n"
-        "    assert_asset_lock_store,\n"
-        "    assert_file_exists,\n"
-        "    assert_item_alternate_hrefs,\n"
-        "    assert_item_asset_hrefs,\n"
-        "    assert_item_provider_names,\n"
-        "    assert_no_file,\n"
-        "    assert_package_asset_files,\n"
-        "    assert_package_assets,\n"
-        "    assert_package_file,\n"
-        "    assert_package_items,\n"
-        "    assert_parquet_columns,\n"
-        "    assert_parquet_equals,\n"
-        "    assert_parquet_rows,\n"
-        "    setup_file,\n"
-        "    setup_openaerialmap_provider_asset_lock,\n"
-        "    setup_openaerialmap_provider_items,\n"
-        "    setup_openaerialmap_asset_lock,\n"
-        "    setup_openaerialmap_items,\n"
-        "    setup_openaerialmap_s3_items,\n"
-        ")\n\n\n"
+        "from tests.usecases import runtime\n\n\n"
         "@pytest.mark.usecase\n"
         f"def {usecase.test_name}(tmp_path: Path) -> None:\n"
         f"{body}\n"
@@ -241,25 +212,21 @@ def generate_usecase_artifacts(
     sources_and_usecases = [
         (source, parse_usecase_shell(source)) for source in sorted(source_dir.glob(source_pattern))
     ]
-    usecases = [usecase for _, usecase in sources_and_usecases]
-    index_path = markdown_dir / "index.md"
-    if not check:
-        _write_or_check(
-            index_path,
-            markdown_index_from_usecases(usecases),
-            check=False,
-        )
-        generated_markdown.append(index_path)
     for source, usecase in sources_and_usecases:
         markdown_path = markdown_dir / f"{usecase.slug}.md"
+        output_path = markdown_dir / f"{usecase.slug}.output.json"
         test_path = test_dir / _test_filename(usecase)
         if not check:
-            _write_or_check(markdown_path, markdown_from_usecase(usecase), check=False)
+            _write_or_check(
+                markdown_path,
+                markdown_from_usecase(usecase, output_path=output_path),
+                check=False,
+            )
             generated_markdown.append(markdown_path)
         else:
             markdown_from_usecase(usecase)
         if usecase.generate_test:
-            test_text = python_test_from_usecase(usecase)
+            test_text = python_test_from_usecase(usecase, output_path=output_path)
         else:
             test_text = ""
         if usecase.generate_test and write_tests and (not check or check_tests):
@@ -285,7 +252,10 @@ def generate_usecase_tests(
         if not usecase.generate_test:
             continue
         test_path = test_dir / _test_filename(usecase)
-        _write_or_check(test_path, python_test_from_usecase(usecase), check=False)
+        output_path = DEFAULT_MARKDOWN_DIR / f"{usecase.slug}.output.json"
+        _write_or_check(
+            test_path, python_test_from_usecase(usecase, output_path=output_path), check=False
+        )
         tests.append(test_path)
     _prune_generated_tests(test_dir, keep=tests)
     return tests
@@ -315,38 +285,14 @@ def _directive_call(command: str) -> str:
     name = tokens[0]
     if name == "setup-openaerialmap-items" and len(tokens) >= 2:
         return _fixture_call("setup_openaerialmap_items", tokens)
-    if name == "setup-openaerialmap-s3-items" and len(tokens) >= 2:
-        return _fixture_call("setup_openaerialmap_s3_items", tokens)
-    if name == "setup-openaerialmap-asset-lock" and len(tokens) >= 2:
-        return _fixture_call("setup_openaerialmap_asset_lock", tokens)
-    if name == "setup-openaerialmap-provider-items" and len(tokens) >= 2:
-        return _fixture_call("setup_openaerialmap_provider_items", tokens)
-    if name == "setup-openaerialmap-provider-asset-lock" and len(tokens) >= 2:
-        return _fixture_call("setup_openaerialmap_provider_asset_lock", tokens)
-    if name == "setup-file" and len(tokens) >= 2:
-        text = _option_value(tokens, "--text") or "# Generated usecase include\n"
-        return f"setup_file(tmp_path, {_py_string(tokens[1])}, text={_py_string(text)})"
     if name == "assert-parquet-rows" and len(tokens) == 3:
         return _row_assertion_call("assert_parquet_rows", tokens)
     if name == "assert-parquet-columns" and len(tokens) >= 3:
         return _varargs_call("assert_parquet_columns", tokens[1:])
-    if name == "assert-parquet-equals" and len(tokens) == 3:
-        return _varargs_call("assert_parquet_equals", tokens[1:])
     if name == "assert-package-items" and len(tokens) == 3:
         return _row_assertion_call("assert_package_items", tokens)
     if name == "assert-package-assets" and len(tokens) == 3:
         return _row_assertion_call("assert_package_assets", tokens)
-    if name == "assert-package-file" and len(tokens) == 3:
-        return _varargs_call("assert_package_file", tokens[1:])
-    if name == "assert-package-asset-files" and len(tokens) == 3:
-        _require_int(tokens[2], "asset file count")
-        return _varargs_call("assert_package_asset_files", [tokens[1], int(tokens[2])])
-    if name == "assert-item-provider-names" and len(tokens) >= 3:
-        return _varargs_call("assert_item_provider_names", tokens[1:])
-    if name == "assert-item-asset-hrefs" and len(tokens) >= 3:
-        return _href_assertion_call("assert_item_asset_hrefs", tokens[1:])
-    if name == "assert-item-alternate-hrefs" and len(tokens) >= 4:
-        return _href_assertion_call("assert_item_alternate_hrefs", tokens[1:])
     if name == "assert-asset-lock-keys" and len(tokens) >= 3:
         return _varargs_call("assert_asset_lock_keys", tokens[1:])
     if name == "assert-asset-lock-store" and len(tokens) >= 3:
@@ -355,6 +301,10 @@ def _directive_call(command: str) -> str:
         return f"assert_file_exists(tmp_path, {_py_string(tokens[1])})"
     if name == "assert-no-file" and len(tokens) == 2:
         return f"assert_no_file(tmp_path, {_py_string(tokens[1])})"
+    if name == "assert-verified-package" and len(tokens) == 2:
+        return _varargs_call("assert_verified_package", tokens[1:])
+    if name == "assert-validation-report" and len(tokens) == 3:
+        return _row_assertion_call("assert_validation_report", tokens)
     raise UnsupportedCommand(f"unsupported test directive: {command}")
 
 
@@ -372,15 +322,6 @@ def _row_assertion_call(function: str, tokens: list[str]) -> str:
 def _varargs_call(function: str, args: list[str | int]) -> str:
     rendered = ", ".join(_py_value(arg) for arg in args)
     return f"{function}(tmp_path, {rendered})"
-
-
-def _href_assertion_call(function: str, args: list[str]) -> str:
-    asset_keys = _option_values(args, "--asset-key")
-    positional = _without_option_values(args, "--asset-key")
-    call = _varargs_call(function, positional)
-    if asset_keys:
-        return call[:-1] + f", asset_keys={_py_tuple(asset_keys)})"
-    return call
 
 
 def _asset_lock_store_call(args: list[str]) -> str:
@@ -569,7 +510,7 @@ def main() -> int:
         write_tests=not args.no_tests,
     ):
         print(artifact.markdown)
-        if not args.no_tests:
+        if not args.no_tests and artifact.test.exists():
             print(artifact.test)
     return 0
 

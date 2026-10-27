@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -15,13 +16,21 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any, TypeVar
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import obstore as obs
 import pyarrow as pa
 from obstore.store import HTTPStore, from_url
 
 from stacpkg.assets import asset_lock_table
+from stacpkg.checksums import (
+    checksum_from_metadata,
+    etag_to_file_checksum,
+    file_checksum_algorithm,
+    multihash_from_digest,
+    normalize_checksum_strategy,
+)
+
 from stacpkg.locators import (
     href_from_location,
     normalize_store_type,
@@ -130,7 +139,7 @@ def _store_url_and_path(href: str) -> tuple[str, str]:
     if not scheme:
         return "file:///", href
     if scheme == "file":
-        return "file:///", parsed.path
+        return "file:///", unquote(parsed.path)
     if scheme in {"s3", "s3a", "gs", "gcs", "az", "abfs", "abfss"}:
         store_scheme = "gs" if scheme == "gcs" else scheme
         return f"{store_scheme}://{parsed.netloc}", parsed.path.lstrip("/")
@@ -309,6 +318,7 @@ def _meta_fields(meta: dict[str, object] | None) -> dict[str, object]:
     meta = meta or {}
     fields = {
         "size_bytes": _meta_lookup(meta, "size", "content_length", "content-length"),
+        "file_checksum": checksum_from_metadata(meta),
         "etag": _meta_lookup(meta, "e_tag", "etag", "ETag"),
         "last_modified": _meta_lookup(meta, "last_modified", "last-modified", "LastModified"),
     }
@@ -388,32 +398,85 @@ async def _head_asset(href: str, endpoint_url: str | None) -> dict[str, object]:
     return await _head_href(href)
 
 
+async def _checksum_href(
+    href: str,
+    endpoint_url: str | None,
+    *,
+    algorithm: str = "sha256",
+    chunk_size: int = 1024 * 1024,
+) -> tuple[str, int]:
+    store_url, path = _store_url_and_path(href)
+    store = _store_from_url(store_url, endpoint_url=endpoint_url)
+    response = await obs.get_async(store, path)
+    digest = hashlib.new(algorithm)
+    size = 0
+    async for chunk in response.stream(min_chunk_size=chunk_size):
+        digest.update(chunk)
+        size += len(chunk)
+    checksum = multihash_from_digest(algorithm, digest.digest())
+    assert checksum is not None
+    return checksum, size
+
+
+async def _observe_row(
+    row: dict[str, object],
+    *,
+    checksum: str,
+    expected_checksum: str | None = None,
+) -> tuple[dict[str, object], str]:
+    href = href_from_location(row)
+    if not href:
+        raise ValueError("asset location is empty")
+    endpoint = _row_endpoint_url(row)
+    meta = await _head_asset(href, endpoint)
+    facts = _meta_fields(meta)
+    observed = facts.get("file_checksum")
+    method = "provider-" + file_checksum_algorithm(observed) if observed else "metadata"
+    if checksum == "use-etag" and not observed:
+        observed = etag_to_file_checksum(facts.get("etag"))
+        if observed:
+            method = "etag-md5"
+    expected_algorithm = file_checksum_algorithm(expected_checksum)
+    if checksum == "calculate-always" or (
+        checksum == "calculate-if-needed"
+        and (
+            not observed
+            or (expected_algorithm and file_checksum_algorithm(observed) != expected_algorithm)
+        )
+    ):
+        observed, size = await _checksum_href(
+            href, endpoint, algorithm=expected_algorithm or "sha256"
+        )
+        facts["size_bytes"] = size
+        current = _meta_fields(await _head_asset(href, endpoint))
+        for field in ("size_bytes", "etag", "last_modified"):
+            if (
+                facts.get(field) is not None
+                and current.get(field) is not None
+                and facts[field] != current[field]
+            ):
+                raise ValueError("asset changed while its checksum was calculated")
+        method = "bytes-" + file_checksum_algorithm(observed)
+    facts["file_checksum"] = observed
+    return facts, method
+
+
 async def _stat_row(
     source_row: dict[str, object],
     *,
     keep_going: bool,
+    checksum: str = "metadata",
 ) -> dict[str, object]:
     row = dict(source_row)
-    href = href_from_location(row)
-    if not isinstance(href, str) or not href:
-        if not keep_going:
-            raise ValueError("asset location is empty")
-        LOGGER.debug("stat row skipped: asset location is empty")
-        return row
-    endpoint_url = _row_endpoint_url(row)
-
     try:
-        meta = await _head_asset(href, endpoint_url)
-        row.update(_meta_fields(meta))
+        facts, _ = await _observe_row(row, checksum=checksum)
+        row.update(facts)
         return row
     except Exception:
         if not keep_going:
             raise
-        LOGGER.debug(
-            "stat row failed but keep-going is enabled: href=%s",
-            _log_location(href),
-            exc_info=True,
-        )
+        row.pop("file_checksum", None)
+        LOGGER.debug("metadata lookup failed", exc_info=True)
         return row
 
 
@@ -424,6 +487,7 @@ def stat_assets(
     asset_keys: set[str] | None = None,
     keep_going: bool = False,
     max_workers: int = DEFAULT_COPY_MAX_WORKERS,
+    checksum: str = "metadata",
 ) -> pa.Table:
     return _run_async(
         _stat_assets_async(
@@ -432,6 +496,7 @@ def stat_assets(
             asset_keys=asset_keys,
             keep_going=keep_going,
             max_workers=max_workers,
+            checksum=normalize_checksum_strategy(checksum),
         )
     )
 
@@ -443,17 +508,15 @@ async def _stat_assets_async(
     asset_keys: set[str] | None,
     keep_going: bool,
     max_workers: int,
+    checksum: str = "metadata",
 ) -> pa.Table:
     semaphore = asyncio.Semaphore(max(1, max_workers))
 
-    async def guarded_stat(row: dict[str, object]) -> dict[str, object]:
+    async def guarded_stat(row):
         if not _selected(row, item_ids=item_ids, asset_keys=asset_keys):
             return dict(row)
         async with semaphore:
-            return await _stat_row(
-                row,
-                keep_going=keep_going,
-            )
+            return await _stat_row(row, keep_going=keep_going, checksum=checksum)
 
     rows = await asyncio.gather(*(guarded_stat(row) for row in assets.to_pylist()))
     return asset_lock_table(rows)
@@ -463,68 +526,80 @@ async def _validate_row(
     source_row: dict[str, object],
     *,
     keep_going: bool,
+    checksum: str = "metadata",
 ) -> dict[str, object]:
     row = dict(source_row)
+    result = {
+        name: row.get(name)
+        for name in (
+            "item_id",
+            "asset_key",
+            "store_type",
+            "store_container",
+            "key",
+        )
+    }
+    if row.get("store_endpoint_url"):
+        result["store_endpoint_url"] = row["store_endpoint_url"]
+    result.update(
+        valid=False,
+        errors=[],
+        method="metadata",
+        expected_checksum=row.get("file_checksum"),
+        observed_checksum=None,
+        comparison="unavailable",
+    )
     missing = _missing_required_fields(row)
     if missing:
-        return _validation_result(row, valid=False, errors=[f"missing fields: {','.join(missing)}"])
-
-    href = href_from_location(row)
-    if not isinstance(href, str) or not href:
-        return _validation_result(row, valid=False, errors=["asset location is empty"])
-    endpoint_url = _row_endpoint_url(row)
-
+        result["errors"] = ["missing fields: " + ",".join(missing)]
+        return result
     try:
-        meta = await _head_asset(href, endpoint_url)
-        actual = _meta_fields(meta)
-        errors: list[str] = []
-        expected_size = row.get("size_bytes")
-        actual_size = actual.get("size_bytes")
-        if expected_size is not None and actual_size is not None and expected_size != actual_size:
-            errors.append(f"size mismatch: expected {expected_size}, actual {actual_size}")
-
-        expected_etag = row.get("etag")
-        actual_etag = actual.get("etag")
-        if expected_etag and actual_etag and expected_etag != actual_etag:
-            errors.append(f"etag mismatch: expected {expected_etag}, actual {actual_etag}")
-
-        expected_last_modified = row.get("last_modified")
-        actual_last_modified = actual.get("last_modified")
-        if (
-            expected_last_modified
-            and actual_last_modified
-            and expected_last_modified != actual_last_modified
-        ):
-            errors.append(
-                "last_modified mismatch: "
-                f"expected {expected_last_modified}, actual {actual_last_modified}"
-            )
-
-        return _validation_result(row, valid=not errors, errors=errors)
+        facts, method = await _observe_row(
+            row,
+            checksum=checksum,
+            expected_checksum=row.get("file_checksum"),
+        )
+        errors = []
+        metadata_changes = []
+        expected, actual = row.get("file_checksum"), facts.get("file_checksum")
+        content_match = bool(expected and expected == actual)
+        for field in ("size_bytes", "etag", "last_modified"):
+            expected_fact, actual_fact = row.get(field), facts.get(field)
+            changes = metadata_changes if content_match and field != "size_bytes" else errors
+            if expected_fact is not None and actual_fact is None:
+                changes.append(f"{field} unavailable for comparison")
+            if (
+                expected_fact is not None
+                and actual_fact is not None
+                and expected_fact != actual_fact
+            ):
+                label = "size" if field == "size_bytes" else field
+                changes.append(f"{label} mismatch: expected {expected_fact}, actual {actual_fact}")
+        if expected and expected != actual:
+            errors.append("checksum mismatch" if actual else "checksum unavailable for comparison")
+        result.update(
+            valid=not errors,
+            errors=errors,
+            method=method,
+            observed_checksum=actual,
+            comparison=(
+                ("match" if expected == actual else "mismatch")
+                if expected and actual
+                else "unavailable"
+                if expected
+                else "baseline"
+                if actual
+                else "metadata"
+            ),
+            observed=facts,
+            metadata_changes=metadata_changes,
+        )
+        return result
     except Exception as error:
         if not keep_going:
             raise
-        return _validation_result(row, valid=False, errors=[str(error)])
-
-
-def _validation_result(
-    row: dict[str, object],
-    *,
-    valid: bool,
-    errors: list[str],
-) -> dict[str, object]:
-    result = {
-        "item_id": row.get("item_id"),
-        "asset_key": row.get("asset_key"),
-        "store_type": normalize_store_type(row.get("store_type")),
-        "store_container": row.get("store_container"),
-        "key": row.get("key"),
-        "valid": valid,
-        "errors": errors,
-    }
-    if row.get("store_endpoint_url"):
-        result["store_endpoint_url"] = _row_endpoint_url(row)
-    return result
+        result["errors"] = [type(error).__name__ + ": asset check failed"]
+        return result
 
 
 def validate_assets(
@@ -534,6 +609,7 @@ def validate_assets(
     asset_keys: set[str] | None = None,
     keep_going: bool = False,
     max_workers: int = DEFAULT_COPY_MAX_WORKERS,
+    checksum: str = "metadata",
 ) -> list[dict[str, object]]:
     return _run_async(
         _validate_assets_async(
@@ -542,6 +618,7 @@ def validate_assets(
             asset_keys=asset_keys,
             keep_going=keep_going,
             max_workers=max_workers,
+            checksum=normalize_checksum_strategy(checksum),
         )
     )
 
@@ -553,22 +630,21 @@ async def _validate_assets_async(
     asset_keys: set[str] | None,
     keep_going: bool,
     max_workers: int,
+    checksum: str = "metadata",
 ) -> list[dict[str, object]]:
     semaphore = asyncio.Semaphore(max(1, max_workers))
 
-    async def guarded_validate(row: dict[str, object]) -> dict[str, object]:
+    async def guarded_validate(row):
         async with semaphore:
-            return await _validate_row(
-                row,
-                keep_going=keep_going,
-            )
+            return await _validate_row(row, keep_going=keep_going, checksum=checksum)
 
-    rows = [
-        row
-        for row in assets.to_pylist()
-        if _selected(row, item_ids=item_ids, asset_keys=asset_keys)
-    ]
-    return await asyncio.gather(*(guarded_validate(row) for row in rows))
+    return await asyncio.gather(
+        *(
+            guarded_validate(row)
+            for row in assets.to_pylist()
+            if _selected(row, item_ids=item_ids, asset_keys=asset_keys)
+        )
+    )
 
 
 def _index(assets: pa.Table) -> dict[tuple[object, object], dict[str, object]]:
@@ -581,6 +657,7 @@ async def _copy_row(
     *,
     runtime: CopyRuntime,
     budget: CopyMemoryBudget,
+    checksum: str,
     overwrite: bool,
     keep_going: bool,
 ) -> dict[str, object]:
@@ -602,7 +679,13 @@ async def _copy_row(
     if not isinstance(target_href, str) or not target_href:
         LOGGER.debug("copy row skipped: target location is empty for key=%s", key)
         return row
-    if source_href == target_href:
+    if source_href == target_href and _row_endpoint_url(source_row) == _row_endpoint_url(row):
+        if checksum != "metadata":
+            result = await _validate_row(source_row, keep_going=keep_going, checksum=checksum)
+            if not result["valid"]:
+                raise ValueError("source asset check failed: " + "; ".join(result["errors"]))
+            row.update(result["observed"])
+            return row
         LOGGER.debug("copy row skipped: source and target locations are identical for key=%s", key)
         return row
 
@@ -631,16 +714,58 @@ async def _copy_row(
                 budget.current_reserved_bytes,
             )
             response = await obs.get_async(source_store, source_path)
+            expected = source_row.get("file_checksum")
+            calculate = checksum in {"calculate-if-needed", "calculate-always"} or bool(expected)
+            digest = hashlib.sha256()
+            expected_algorithm = file_checksum_algorithm(expected)
+            expected_digest = hashlib.new(expected_algorithm) if expected_algorithm else None
+            transferred_size = 0
+
+            async def chunks():
+                nonlocal transferred_size
+                async for chunk in response.stream(min_chunk_size=runtime.chunk_size_bytes):
+                    transferred_size += len(chunk)
+                    if calculate:
+                        digest.update(chunk)
+                        if expected_digest is not None:
+                            expected_digest.update(chunk)
+                    yield chunk
+
             await obs.put_async(
                 target_store,
                 target_path_value,
-                response.stream(min_chunk_size=runtime.chunk_size_bytes),
+                chunks(),
                 mode="overwrite" if overwrite else "create",
                 chunk_size=runtime.chunk_size_bytes,
                 max_concurrency=runtime.put_max_concurrency,
             )
-        target_meta = await obs.head_async(target_store, target_path_value)
-        row.update(_meta_fields(target_meta))
+            target_meta = await obs.head_async(target_store, target_path_value)
+            row.pop("file_checksum", None)
+            row.update(_meta_fields(target_meta))
+            if checksum == "use-etag" and not row.get("file_checksum"):
+                row["file_checksum"] = etag_to_file_checksum(row.get("etag"))
+            if calculate:
+                if (
+                    source_row.get("size_bytes") is not None
+                    and source_row["size_bytes"] != transferred_size
+                ):
+                    raise ValueError("source size mismatch during copy")
+                source_checksum = multihash_from_digest("sha256", digest.digest())
+                if expected_digest is not None and expected != multihash_from_digest(
+                    expected_algorithm, expected_digest.digest()
+                ):
+                    raise ValueError("source checksum mismatch during copy")
+                destination_checksum = row.get("file_checksum")
+                if file_checksum_algorithm(destination_checksum) != "sha256":
+                    destination_checksum, destination_size = await _checksum_href(
+                        target_href,
+                        _row_endpoint_url(row),
+                        chunk_size=runtime.chunk_size_bytes,
+                    )
+                    row["size_bytes"] = destination_size
+                if source_checksum != destination_checksum:
+                    raise ValueError("destination checksum mismatch after copy")
+                row["file_checksum"] = destination_checksum
         LOGGER.debug(
             "copy row completed: target=%s size=%s etag=%s",
             _log_location(target_href),
@@ -655,6 +780,7 @@ async def _copy_row(
                 _log_location(target_href),
             )
             raise
+        row.pop("file_checksum", None)
         LOGGER.warning(
             "copy row failed but keep-going is enabled: source=%s target=%s",
             _log_location(source_href),
@@ -673,6 +799,7 @@ def copy_assets(
     memory_limit_bytes: int = DEFAULT_COPY_MEMORY_LIMIT_BYTES,
     chunk_size_bytes: int = DEFAULT_COPY_CHUNK_SIZE_BYTES,
     put_max_concurrency: int = DEFAULT_COPY_PUT_MAX_CONCURRENCY,
+    checksum: str = "metadata",
 ) -> pa.Table:
     return _run_async(
         _copy_assets_async(
@@ -684,6 +811,7 @@ def copy_assets(
             memory_limit_bytes=memory_limit_bytes,
             chunk_size_bytes=chunk_size_bytes,
             put_max_concurrency=put_max_concurrency,
+            checksum=normalize_checksum_strategy(checksum),
         )
     )
 
@@ -698,6 +826,7 @@ async def _copy_assets_async(
     memory_limit_bytes: int,
     chunk_size_bytes: int,
     put_max_concurrency: int,
+    checksum: str = "metadata",
 ) -> pa.Table:
     runtime = CopyRuntime(
         max_workers=max_workers,
@@ -735,6 +864,7 @@ async def _copy_assets_async(
                 source_index,
                 runtime=runtime,
                 budget=budget,
+                checksum=checksum,
                 overwrite=overwrite,
                 keep_going=keep_going,
             )

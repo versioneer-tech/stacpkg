@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import posixpath
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 OBSTORE_STORE_TYPES = ("file", "s3", "gs", "az", "http", "https")
 _STORE_TYPE_ALIASES = {
@@ -37,7 +37,7 @@ def location_from_href(href: object) -> dict[str, object]:
     if not parsed.scheme:
         return {"store_type": "file", "store_container": None, "key": href}
     if parsed.scheme == "file":
-        return {"store_type": "file", "store_container": None, "key": parsed.path}
+        return {"store_type": "file", "store_container": None, "key": unquote(parsed.path)}
     if parsed.scheme in {"s3", "s3a", "gs", "gcs", "az", "abfs", "abfss"}:
         return {
             "store_type": normalize_store_type(parsed.scheme),
@@ -60,13 +60,13 @@ def location_from_href(href: object) -> dict[str, object]:
 
 
 def href_from_location(row: dict[str, object]) -> str | None:
-    legacy_href = row.get("href")
+    raw_href = row.get("href")
     store_type = normalize_store_type(row.get("store_type"))
     key = row.get("key")
     container = row.get("store_container")
 
     if store_type is None:
-        return legacy_href if isinstance(legacy_href, str) and legacy_href else None
+        return raw_href if isinstance(raw_href, str) and raw_href else None
     if not isinstance(key, str):
         return None
     if store_type == "file":
@@ -85,7 +85,7 @@ def href_from_location(row: dict[str, object]) -> str | None:
         if not key:
             return container
         return f"{container.rstrip('/')}/{key.lstrip('/')}"
-    return legacy_href if isinstance(legacy_href, str) and legacy_href else None
+    return raw_href if isinstance(raw_href, str) and raw_href else None
 
 
 def child_location(base: dict[str, object], path: str) -> dict[str, object]:

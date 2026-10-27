@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import uuid
 from pathlib import Path
 
@@ -12,7 +13,8 @@ import pytest
 
 from stacpkg.dataset import build_package
 from stacpkg.oci import pull_package, push_package
-from tests.data.openaerialmap_data import openaerialmap_items
+from stacpkg.workflows import validate_package
+from tests.unit.openaerialmap_fixture import localized_openaerialmap_items
 from tests.e2e.helpers import registry_target
 
 
@@ -25,21 +27,27 @@ def _file_checksums(package_dir: Path) -> dict[str, str]:
 
 
 @pytest.mark.e2e
-def test_push_and_pull_with_basic_auth_registry(tmp_path: Path) -> None:
+def test_push_and_pull_with_basic_auth_registry(tmp_path: Path, monkeypatch) -> None:
     if not os.environ.get("ORAS_USER") or not os.environ.get("ORAS_PASS"):
         pytest.skip("set ORAS_USER and ORAS_PASS to run the Basic-auth OCI registry e2e test")
+
+    # Use test credentials without reading Docker logins or netrc files.
+    monkeypatch.setattr("oras.utils.find_docker_config", lambda exists=True: None)
+    monkeypatch.setenv("NETRC", str(tmp_path / "xyz.netrc"))
 
     package = tmp_path / "source.pkg"
     pulled = tmp_path / "pulled.pkg"
     readme = tmp_path / "README.md"
     readme.write_text("Basic-auth OCI acceptance package\n", encoding="utf-8")
     build_package(
-        openaerialmap_items(item_count=1),
+        localized_openaerialmap_items(tmp_path, copy_asset_keys={"thumbnail", "metadata"}),
         package,
         includes=[readme],
-        probe_metadata=False,
+        include_assets=True,
+        include_metadata_assets=True,
     )
     expected_checksums = _file_checksums(package)
+    shutil.rmtree(tmp_path / "openaerialmap-local-assets")
     target = registry_target("stacpkg/basic-auth", uuid.uuid4().hex)
 
     push_package(
@@ -55,9 +63,5 @@ def test_push_and_pull_with_basic_auth_registry(tmp_path: Path) -> None:
         auth_backend="basic",
     )
 
-    assert expected_checksums.keys() == {
-        "README.md",
-        "assets.lock.parquet",
-        "items.parquet",
-    }
     assert _file_checksums(pulled) == expected_checksums
+    assert list(validate_package(pulled))[-1]["valid"] is True
